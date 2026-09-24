@@ -169,19 +169,22 @@ const notebookSearchParams = Type.Object({
 	path: Type.String({ description: "Path to an .ipynb notebook." }),
 	pattern: Type.String({ description: "JavaScript regular expression matched against each line of cell source." }),
 	ignoreCase: Type.Optional(Type.Boolean({ description: "Case-insensitive match. Defaults to false." })),
+	outputs: Type.Optional(
+		Type.Boolean({ description: "Also search text outputs (streams, tracebacks, text mime variants). Defaults to false." })
+	),
 	lineOffset: Type.Optional(Type.Integer({ minimum: 1, description: "1-based line number to start reading the results from." })),
 	lineLimit: Type.Optional(Type.Integer({ minimum: 0, description: "Maximum number of result lines to read from the offset." }))
 })
 
 async function runNotebookSearch(params: Static<typeof notebookSearchParams>): Promise<NotebookToolContent> {
 	const notebook = await readNotebook(params.path)
-	const text = searchNotebook(notebook, new RegExp(params.pattern, params.ignoreCase ? "i" : ""))
+	const text = searchNotebook(notebook, new RegExp(params.pattern, params.ignoreCase ? "i" : ""), params.outputs)
 	return [{ type: "text", text: sliceCellSource(text, params.lineOffset, params.lineLimit) }]
 }
 
 export const notebookSearchTool = {
 	name: "notebook_search",
-	description: "Find the cells and source lines matching a regular expression.",
+	description: "Find the cells and source lines (optionally output lines) matching a regular expression.",
 	params: notebookSearchParams,
 	run: runNotebookSearch
 } as const
