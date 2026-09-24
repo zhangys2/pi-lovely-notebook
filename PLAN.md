@@ -3,6 +3,9 @@
 Done: file-oriented notebook tools (summary, read, edit, structural mutation, outputs,
 attachments) over a shared core, shipped as a Pi extension and a stdio MCP server.
 
+Interim done: `notebook_run_all` runs a whole notebook in a fresh kernel through nbconvert. It
+has no live kernel state and can't run single cells, so the bridge below is still the goal.
+
 Next: execution. Pi should run cells of notebooks the user already has open in VSCode, using the
 kernel VSCode already selected — through a narrow companion VSCode extension in this repo, not by
 implementing Jupyter kernel/session management inside Pi.
