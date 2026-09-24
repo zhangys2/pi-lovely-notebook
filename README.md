@@ -41,6 +41,7 @@ Notebooks are nbformat 4 only. Every tool acts on one cell, selected by `cellId`
 | `notebook_read_cell_output` | One output, as text or image (index optional for single-output cells) |
 | `notebook_read_cell_attachment` | One image pasted into a markdown cell, by its `attachment:` key |
 | `notebook_run_all` | Pi only: run the whole notebook in a fresh kernel and save outputs (needs Jupyter on PATH) |
+| `notebook_execute_cell` | Pi only: run one cell in the kernel VSCode has running (needs the [bridge extension](packages/vscode/README.md)) |
 
 Mutations preserve cell ids, metadata, and outputs. Notebooks without cell ids stay that way —
 address their cells by index.

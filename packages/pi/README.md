@@ -26,6 +26,7 @@ pi -e npm:@xl0/pi-lovely-notebook           # try it for one run
 | `notebook_read_cell_output` | One output, as text or image (index optional for single-output cells) |
 | `notebook_read_cell_attachment` | One image pasted into a markdown cell, by its `attachment:` key |
 | `notebook_run_all` | Run the whole notebook in a fresh kernel and save outputs (needs Jupyter on PATH) |
+| `notebook_execute_cell` | Run one cell in the kernel VSCode has running and return its outputs (needs the Lovely Notebook Bridge VSCode extension) |
 
 nbformat 4 only. Each tool acts on one cell, selected by `cellId` or 0-based `index`.
 Mutations preserve ids, metadata, and outputs; notebooks without cell ids stay that way and are

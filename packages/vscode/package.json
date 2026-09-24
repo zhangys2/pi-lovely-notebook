@@ -1,0 +1,36 @@
+{
+	"name": "lovely-notebook-bridge",
+	"displayName": "Lovely Notebook Bridge",
+	"description": "Lets the pi lovely-notebook extension run notebook cells in the kernel VSCode has running.",
+	"version": "0.1.0",
+	"private": true,
+	"publisher": "zhangys2",
+	"license": "MIT",
+	"repository": {
+		"type": "git",
+		"url": "git+https://github.com/zhangys2/pi-lovely-notebook.git",
+		"directory": "packages/vscode"
+	},
+	"engines": {
+		"vscode": "^1.90.0"
+	},
+	"categories": [
+		"Notebooks"
+	],
+	"extensionDependencies": [
+		"ms-toolsai.jupyter"
+	],
+	"activationEvents": [
+		"onNotebook:jupyter-notebook"
+	],
+	"main": "./dist/extension.js",
+	"scripts": {
+		"build": "bun build src/extension.ts --outfile dist/extension.js --target node --format cjs --external vscode",
+		"package": "bun run build && vsce package --no-dependencies --out dist/lovely-notebook-bridge.vsix"
+	},
+	"devDependencies": {
+		"@types/vscode": "~1.90.0",
+		"@vscode/jupyter-extension": "^1.1.1",
+		"@vscode/vsce": "^3.6.0"
+	}
+}

@@ -11,6 +11,8 @@ Bun workspace (`workspaces: ["packages/*"]`), three independently published `@xl
   No Pi/MCP imports; only runtime dep is `typebox` (peer).
 - `packages/pi` — `@xl0/pi-lovely-notebook`: Pi extension adapter; core + Pi peers.
 - `packages/mcp` — `@xl0/lovely-notebook-mcp`: stdio MCP server; core + MCP SDK + typebox.
+- `packages/vscode` — `lovely-notebook-bridge`: private VSCode extension (local VSIX) that runs
+  cells for Pi's `notebook_execute_cell`. No core dependency.
 
 Thin adapters keep the Pi and MCP dependency trees isolated. Root `package.json` sets
 `pi.extensions: ["./packages/pi/extensions"]` so Pi sessions in this repo dogfood the extension.
@@ -178,10 +180,38 @@ cells' outputs) and the count is reported, since nothing else would show the los
 - Relative paths resolve against the server process startup cwd.
 - No resizer: images above 4MB base64 become omission notes.
 
+## VSCode bridge (ADR-0010, ADR-0011)
+
+`packages/vscode/src/`: `protocol.ts` (wire types, no `vscode` import; Pi imports it type-only),
+`handlers.ts` (`executeCell` over a `NotebookHost`/`HostDocument` interface), `server.ts` (HTTP),
+`vscode-host.ts` (the real host), `extension.ts` (activation).
+
+- One endpoint, `POST /execute-cell`. Pi walks the connection files and sends the run to each
+  live window until one doesn't answer `not-open`, so there is no discovery method.
+- `executeCell` order: find document → find cell (`metadata.id` or index) → source match
+  (CRLF-normalized, since VSCode on Windows may type CRLF) → running kernel → run → outputs →
+  save only if the document was clean before the run.
+- Auth: 32-byte token compared in constant time, plus `Host` must equal `127.0.0.1:<port>` against
+  DNS rebinding. Pi aborting closes the socket, which aborts the run and interrupts the cell.
+- `vscode-host.ts`: runs via `notebook.cell.execute` with `{ranges, document}` and waits for the
+  cell's `executionSummary.timing.endTime` in `onDidChangeNotebookDocument`, subscribing before it
+  starts; cancels with `notebook.cell.cancelExecution`. "Running kernel" is Jupyter's
+  `kernels.getKernel(uri)`, which only sees started kernels. Outputs are mapped back to nbformat
+  (stdout/stderr/error mimes to stream/error, images to base64, `outputType` metadata for
+  `execute_result`).
+- Pi side: `packages/pi/extensions/notebook/bridge.ts` (`executeInBridge`, dead-pid cleanup) and
+  `notebook_execute_cell` in `index.ts`. It reads the disk cell with core `readNotebook` for
+  `expectedSource`, formats outputs with core `formatCellOutputs`, and re-reads after a bridge
+  save to re-arm the stale guard. Path comparison is case-insensitive on Windows.
+- `bun run package` in `packages/vscode` bundles to CJS and builds `dist/lovely-notebook-bridge.vsix`.
+
 ## Tests and tooling
 
-- `bun test` at root: 113 tests, green. The real-kernel `notebook_run_all` test skips when
+- `bun test` at root: 124 tests, green. The real-kernel `notebook_run_all` test skips when
   `jupyter` isn't on PATH, which includes CI.
+- Bridge: `packages/vscode/test/` covers handlers against a fake host and the HTTP server's auth;
+  `packages/pi/test/execute-cell.test.ts` runs the Pi tool against a real bridge server with a
+  fake host (HOME/USERPROFILE pointed at a temp dir). `vscode-host.ts` has no automated test.
 - `.gitattributes` forces LF on checkout: biome requires it, and fixtures are byte-exact save oracles.
 - `packages/core/test/notebook-core.test.ts` covers parse/validation, pure ops, formatting,
   load/save roundtrips. One `notebook-*.tool.test.ts` per tool, one
@@ -234,6 +264,7 @@ Tool-set prompt cost, measured at 14 tools: ~8.4K chars of schema + 0.9K of guid
   so the `^0.1.0` core dep in the Pi/MCP packages resolves.
 - Notebooks not already in Jupyter's canonical form are reformatted once on first save.
 - No-id notebooks depend on index selectors.
-- Execution is whole-notebook, fresh-kernel only (`notebook_run_all`); no per-cell runs in a live
-  kernel until the VSCode bridge in `PLAN.md`. nbconvert writes LF, so a CRLF notebook is
-  rewritten by a run.
+- `notebook_run_all` (nbconvert) writes LF, so a CRLF notebook is rewritten by a run.
+- The bridge's VSCode side (`vscode-host.ts`) is unverified against real VSCode + Jupyter: the
+  `notebook.cell.execute` argument shape, completion detection and output mapping need a manual
+  smoke test.
