@@ -1,5 +1,4 @@
 node_modules/
-bun.lock
 tmp/
 .pi/xl0-lovely-ide.json
 .vscode/

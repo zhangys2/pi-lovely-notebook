@@ -531,6 +531,7 @@ describe("notebook core", () => {
 		const emoji = sliceCellSource(wide4).split("\n")[0] ?? ""
 		expect(Buffer.byteLength(emoji)).toBe(MAX_READ_BYTES)
 		expect(emoji).toBe("🐍".repeat(MAX_READ_BYTES / 4))
+		expect(sliceCellSource(wide4)).toContain(`${(MAX_READ_BYTES * 3) / 2 + 1} more chars]`)
 		expect(sliced.slice(MAX_READ_BYTES)).toBe(
 			`\n[Line truncated at ${MAX_READ_BYTES} bytes: ${MAX_READ_BYTES + 1} more chars]\n[1 more lines. Use offset=2 to continue.]`
 		)
