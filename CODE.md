@@ -100,6 +100,10 @@ bun-only, which is the wrong bet for an MCP server. `bun run release` builds fir
 - Schemas are colocated with their runner and never shared. String enums go through a local
   `StringEnum` helper so providers see `type: "string"` + `enum` rather than `anyOf`/`const`.
 - `mutateNotebook(path, mutate)` consolidates load → mutate → save.
+- Stale guard: a per-process map of each path's stamp (mtime + size) as last read or written.
+  A mutation refuses a file whose stamp moved since (user saved from an editor, another tool
+  wrote it); any read re-arms. Unseen paths are unguarded, and an editor's unsaved buffer is
+  invisible — only the planned VSCode bridge can see that.
 - Source-changing runners take an optional second arg `onChange({before, after})`, called with
   the touched cell's source only after the save succeeds (insert: empty before; delete: empty
   after; merge: the anchor). MCP ignores it.
@@ -161,7 +165,7 @@ cells' outputs) and the count is reported, since nothing else would show the los
 
 ## Tests and tooling
 
-- `bun test` at root: 104 tests, green.
+- `bun test` at root: 106 tests, green.
 - `.gitattributes` forces LF on checkout: biome requires it, and fixtures are byte-exact save oracles.
 - `packages/core/test/notebook-core.test.ts` covers parse/validation, pure ops, formatting,
   load/save roundtrips. One `notebook-*.tool.test.ts` per tool, one

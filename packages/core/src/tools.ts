@@ -1,3 +1,4 @@
+import { stat } from "node:fs/promises"
 import { type Static, type TUnsafe, Type } from "typebox"
 import type { Notebook } from "./notebook"
 import {
@@ -83,10 +84,39 @@ function cellSelectionText(cellId?: string, index?: number): string {
 	return cellId ?? `index ${index}`
 }
 
+/**
+ * Stamp (mtime + size) of each notebook as this process last read or wrote it. A mutation refuses
+ * a file whose stamp moved since, because the model's picture of it is stale: the user saved it
+ * from an editor, or another tool rewrote it. Any read re-arms it. A path never seen before is not
+ * guarded, and an editor's unsaved buffer is invisible here either way.
+ */
+const seenStamps = new Map<string, string>()
+
+async function fileStamp(path: string): Promise<string> {
+	const { mtimeMs, size } = await stat(path)
+	return `${mtimeMs}:${size}`
+}
+
+async function readNotebook(path: string): Promise<Notebook> {
+	// Stamp before loading: a write landing in between leaves the older stamp, so the next
+	// mutation refuses rather than trusting a read that never saw that write.
+	const stamp = await fileStamp(path)
+	const notebook = await loadNotebook(path)
+	seenStamps.set(path, stamp)
+	return notebook
+}
+
 async function mutateNotebook<T>(path: string, mutate: (notebook: Notebook) => T): Promise<T> {
+	const seen = seenStamps.get(path)
+	if (seen !== undefined && (await fileStamp(path)) !== seen) {
+		throw new Error(
+			`${path} changed on disk since it was last read (the user or another tool saved it). Re-read the cell before changing it.`
+		)
+	}
 	const notebook = await loadNotebook(path)
 	const result = mutate(notebook)
 	await saveNotebook(path, notebook)
+	seenStamps.set(path, await fileStamp(path))
 	return result
 }
 
@@ -103,7 +133,7 @@ const notebookSummaryParams = Type.Object({
 })
 
 async function runNotebookSummary(params: Static<typeof notebookSummaryParams>): Promise<NotebookToolContent> {
-	const notebook = await loadNotebook(params.path)
+	const notebook = await readNotebook(params.path)
 	const summary = summarizeNotebook(notebook)
 	return [{ type: "text", text: sliceCellSource(formatNotebookSummary(summary), params.lineOffset, params.lineLimit) }]
 }
@@ -124,7 +154,7 @@ const notebookSearchParams = Type.Object({
 })
 
 async function runNotebookSearch(params: Static<typeof notebookSearchParams>): Promise<NotebookToolContent> {
-	const notebook = await loadNotebook(params.path)
+	const notebook = await readNotebook(params.path)
 	const text = searchNotebook(notebook, new RegExp(params.pattern, params.ignoreCase ? "i" : ""))
 	return [{ type: "text", text: sliceCellSource(text, params.lineOffset, params.lineLimit) }]
 }
@@ -148,6 +178,7 @@ async function runNotebookCreate(params: Static<typeof notebookCreateParams>): P
 	// Exclusive create, so an existing notebook is never clobbered by an empty one: the kernel
 	// refuses atomically, with no window between checking and writing.
 	await saveNewNotebook(params.path, createNotebook(language))
+	seenStamps.set(params.path, await fileStamp(params.path))
 	return [{ type: "text", text: `Created notebook ${params.path} with language ${language}.` }]
 }
 
@@ -168,7 +199,7 @@ const notebookReadCellParams = Type.Object({
 })
 
 async function runNotebookReadCell(params: Static<typeof notebookReadCellParams>): Promise<NotebookToolContent> {
-	const notebook = await loadNotebook(params.path)
+	const notebook = await readNotebook(params.path)
 	const result = readCellAtIndex(notebook, resolveSelectedCellIndex(notebook, params.cellId, params.index))
 	const sliced = sliceCellSource(result.source, params.lineOffset, params.lineLimit)
 
@@ -438,7 +469,7 @@ const notebookReadOutputParams = Type.Object({
 })
 
 async function runNotebookReadOutput(params: Static<typeof notebookReadOutputParams>): Promise<NotebookToolContent> {
-	const notebook = await loadNotebook(params.path)
+	const notebook = await readNotebook(params.path)
 	const result = readCellOutput(notebook, resolveSelectedCellIndex(notebook, params.cellId, params.index), params.outputIndex, params.mime)
 
 	const content: NotebookToolContent = []
@@ -474,7 +505,7 @@ const notebookReadCellAttachmentParams = Type.Object({
 })
 
 async function runNotebookReadCellAttachment(params: Static<typeof notebookReadCellAttachmentParams>): Promise<NotebookToolContent> {
-	const notebook = await loadNotebook(params.path)
+	const notebook = await readNotebook(params.path)
 	const result = readCellAttachment(notebook, resolveSelectedCellIndex(notebook, params.cellId, params.index), params.key)
 	const content: NotebookToolContent = []
 	pushImageContent(content, result, params.lineOffset, params.lineLimit)
