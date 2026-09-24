@@ -15,6 +15,7 @@ import {
 	loadNotebook,
 	mergeCell,
 	moveCell,
+	parseNotebook,
 	readCellAtIndex,
 	readCellAttachment,
 	readCellOutput,
@@ -117,13 +118,34 @@ async function fileStamp(path: string): Promise<string> {
 	return `${mtimeMs}:${size}`
 }
 
-async function readNotebook(path: string): Promise<Notebook> {
+/** Loads a notebook and re-arms the stale guard for it; adapters use it after writes they don't own. */
+export async function readNotebook(path: string): Promise<Notebook> {
 	// Stamp before loading: a write landing in between leaves the older stamp, so the next
 	// mutation refuses rather than trusting a read that never saw that write.
 	const stamp = await fileStamp(path)
 	const notebook = await loadNotebook(path)
 	seenStamps.set(path, stamp)
 	return notebook
+}
+
+/**
+ * Tool content for nbformat outputs held outside any notebook file, such as fresh results from
+ * a live kernel: one `<output index type>` element per output with the text a
+ * `notebook_read_cell_output` read would return, then images. Bounded like every read.
+ */
+export function formatCellOutputs(outputs: unknown[]): NotebookToolContent {
+	if (outputs.length === 0) return [{ type: "text", text: "[No outputs]" }]
+	// Parsing validates the outputs exactly as a file load would.
+	const notebook = parseNotebook(
+		JSON.stringify({ nbformat: 4, nbformat_minor: 5, metadata: {}, cells: [{ cell_type: "code", source: "", metadata: {}, outputs }] })
+	)
+	const images: NotebookImageContent[] = []
+	const elements = outputs.map((_output, index) => {
+		const result = readCellOutput(notebook, 0, index)
+		for (const image of result.images ?? []) images.push({ type: "image", data: image.data, mimeType: image.mime })
+		return `<output index="${index}" type="${result.outputType}">\n${(result.text ?? "").replace(/\n$/, "")}\n</output>`
+	})
+	return [{ type: "text", text: sliceCellSource(elements.join("\n")) }, ...images]
 }
 
 async function mutateNotebook<T>(path: string, mutate: (notebook: Notebook) => T): Promise<T> {

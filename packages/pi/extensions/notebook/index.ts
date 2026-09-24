@@ -3,6 +3,7 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent"
 import { generateDiffString, keyHint, renderDiff, resizeImage, withFileMutationQueue } from "@earendil-works/pi-coding-agent"
 import { Text } from "@earendil-works/pi-tui"
 import {
+	formatCellOutputs,
 	loadNotebook,
 	type NotebookSourceChangeObserver,
 	type NotebookToolContent,
@@ -21,9 +22,13 @@ import {
 	notebookSummaryTool,
 	notebookToolGuidelines,
 	notebookWriteCellTool,
-	parseToolArguments
+	parseToolArguments,
+	readCellAtIndex,
+	readNotebook,
+	resolveCellIndex
 } from "@xl0/lovely-notebook"
 import { type TSchema, Type } from "typebox"
+import { bridgeDirectory, executeInBridge } from "./bridge"
 
 type NotebookRenderTheme = Parameters<NonNullable<Parameters<ExtensionAPI["registerTool"]>[0]["renderCall"]>>[1]
 type NotebookRenderArgs = {
@@ -238,6 +243,15 @@ const notebookRunAllParams = Type.Object({
 	timeoutSeconds: Type.Optional(Type.Integer({ minimum: 1, description: "Limit for the whole run, in seconds. Defaults to 600." }))
 })
 
+const notebookExecuteCellParams = Type.Object({
+	path: Type.String({ description: "Path to an .ipynb notebook that is open in VSCode." }),
+	cellId: Type.Optional(Type.String({ description: "Code cell id to run." })),
+	index: Type.Optional(Type.Integer({ minimum: 0, description: "0-based code cell index to run." })),
+	timeoutSeconds: Type.Optional(
+		Type.Integer({ minimum: 1, description: "Limit for the run, in seconds; the kernel is interrupted past it. Defaults to 600." })
+	)
+})
+
 export default function notebookExtension(pi: ExtensionAPI) {
 	// Guidelines alone don't stop models reaching for read/edit on a notebook; they get escaped
 	// JSON, and a raw-JSON edit bypasses every structural check the notebook tools make.
@@ -286,6 +300,57 @@ export default function notebookExtension(pi: ExtensionAPI) {
 			}
 		})
 	}
+
+	// ADR-0010: one cell in the user's live VSCode kernel, only when the live cell matches disk.
+	pi.registerTool({
+		name: "notebook_execute_cell",
+		label: "Notebook Execute Cell",
+		description:
+			"Run one code cell in the kernel VSCode has running for this notebook and return its outputs. Needs the notebook open in VSCode with the Lovely Notebook bridge extension.",
+		promptSnippet: "Run one cell in the user's VSCode kernel and return its outputs.",
+		promptGuidelines: [
+			"notebook_execute_cell: runs in the user's live VSCode kernel, so variables from earlier runs persist; the VSCode copy of the cell must match disk (otherwise ask the user to save or revert); outputs reach disk only when the VSCode copy had no unsaved edits."
+		],
+		parameters: notebookExecuteCellParams,
+		prepareArguments: args => parseToolArguments(notebookExecuteCellParams, args),
+		renderCall: (args, theme) => renderNotebookCall("notebook_execute_cell", args as NotebookRenderArgs, theme),
+		renderResult: (result, { expanded }, theme) => renderNotebookTextResult(result as NotebookToolRenderResult, expanded, theme),
+		async execute(_toolCallId, params, signal, _onUpdate, ctx) {
+			const path = isAbsolute(params.path) ? params.path : resolve(ctx.cwd, params.path)
+			if ((params.cellId === undefined) === (params.index === undefined))
+				throw new Error("Provide exactly one cell selector: cellId or index")
+			const selector = params.cellId ?? `index ${params.index}`
+			return withFileMutationQueue(path, async (): Promise<NotebookToolRenderResult> => {
+				const notebook = await readNotebook(path)
+				const cell = readCellAtIndex(
+					notebook,
+					resolveCellIndex(notebook, params.cellId === undefined ? { index: params.index ?? 0 } : { cellId: params.cellId })
+				)
+				if (cell.type !== "code") throw new Error(`Cell ${selector} is ${cell.type}, not code.`)
+				const response = await executeInBridge(
+					bridgeDirectory(),
+					{
+						path,
+						...(params.cellId === undefined ? { index: cell.index } : { cellId: params.cellId }),
+						expectedSource: cell.source,
+						timeoutSeconds: params.timeoutSeconds ?? 600
+					},
+					signal
+				)
+				if (!response.ok) throw new Error(response.message)
+				// The bridge's save rewrote the file; reading it back re-arms the stale guard.
+				if (response.saved) await readNotebook(path)
+				const saved = response.saved
+					? "Outputs saved to disk."
+					: "Not saved: the VSCode copy has unsaved edits, so disk reads show old outputs until the user saves."
+				const content = [
+					{ type: "text" as const, text: `Ran cell ${selector} in VSCode. ${saved}` },
+					...formatCellOutputs(response.outputs)
+				]
+				return { content: await resolveContentImages(content), details: undefined }
+			})
+		}
+	})
 
 	// Interim execution: a fresh kernel per run through nbconvert, so no kernel state lives in pi.
 	// The VSCode bridge in PLAN.md is the real answer for per-cell runs in the user's kernel.

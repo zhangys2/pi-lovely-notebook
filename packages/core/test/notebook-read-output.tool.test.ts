@@ -1,8 +1,37 @@
 import { expect, test } from "bun:test"
 import { readFile } from "node:fs/promises"
 import { join } from "node:path"
-import { notebookReadOutputTool, notebookSummaryTool } from "../src/tools"
+import { formatCellOutputs, notebookReadOutputTool, notebookSummaryTool } from "../src/tools"
 import { createTempNotebook, FIXTURE_DIR, firstText } from "./helpers"
+
+test("formatCellOutputs renders loose outputs like reads do, one element per output, images after", () => {
+	const content = formatCellOutputs([
+		{ output_type: "stream", name: "stdout", text: "\u001b[1m42\u001b[0m\n" },
+		{ output_type: "display_data", data: { "image/png": "AAAA", "text/plain": "<Figure>" }, metadata: {} },
+		{ output_type: "error", ename: "E", evalue: "", traceback: ["E: boom"] }
+	])
+	expect(content).toEqual([
+		{
+			type: "text",
+			text: [
+				'<output index="0" type="stream">',
+				"42",
+				"</output>",
+				'<output index="1" type="display_data">',
+				'<output mime="image/png" />',
+				'<output mime="text/plain">',
+				"<Figure>",
+				"</output>",
+				"</output>",
+				'<output index="2" type="error">',
+				"E: boom",
+				"</output>"
+			].join("\n")
+		},
+		{ type: "image", data: "AAAA", mimeType: "image/png" }
+	])
+	expect(formatCellOutputs([])).toEqual([{ type: "text", text: "[No outputs]" }])
+})
 
 test("error and stream outputs are read without ANSI colour codes, which stay in the file", async () => {
 	const text = JSON.stringify({

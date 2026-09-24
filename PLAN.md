@@ -21,45 +21,22 @@ Execution is Pi-only; the MCP server stays file-only.
 - Execution goes through the same path normalization and per-file queue as mutation.
 - Fail honestly ("open it in VSCode and select a kernel") rather than pretend Pi has kernel state.
 
-## [ ] Protocol
+## [x] Bridge built
 
-Localhost HTTP, bearer token, Host-header check. Connection file per window:
-`~/.pi/agent/vscode-bridge/<pid>.json` = `{ port, token, workspaceFolders }`; Pi drops files with
-dead pids. Request/response types live in the bridge package; Pi imports them type-only.
+- Protocol: one endpoint `POST /execute-cell`; Pi tries each live window, no discovery method.
+- Pi tool `notebook_execute_cell`, bridge package with fake-host tests, local VSIX, docs.
 
-Methods, all keyed by absolute notebook path:
-- `health`
-- `hasNotebook(path)`: open in this window, and whether a kernel is selected.
-- `executeCell({ path, cellId?|index?, expectedSource, timeoutSeconds })` → outputs of that cell,
-  whether it saved, or a typed failure: not open, no kernel, cell not found, source mismatch,
-  timed out (kernel interrupted).
+## [ ] Manual smoke test in real VSCode + Jupyter
 
-## [ ] Pi-side tool
+`vscode-host.ts` is untested against the real APIs. Install the VSIX, open a notebook, start a
+kernel, then from pi: run a cell by id and by index; print, rich output, image, error; unsaved
+edit elsewhere (runs, not saved); edited cell (source mismatch); long cell with Esc and with
+`timeoutSeconds` (interrupted); no running kernel; two windows. Fix what breaks.
 
-`notebook_execute_cell({ path, cellId?|index?, timeoutSeconds? })` (default 600s). Reads the disk
-cell to build `expectedSource`, finds the bridge window, calls `executeCell`, and returns the
-outputs in the same shape as `notebook_read_cell_output`. Esc aborts, and the bridge interrupts
-the kernel. After a bridge save, re-read through core so the stale guard re-arms. Guidelines state
-the VSCode requirement and the source-match failure.
+## [ ] Activation smoke test
 
-## [ ] Bridge package
-
-Activates on `onNotebook:jupyter-notebook`. HTTP server, token, connection file written on
-activate and removed on deactivate. Handlers depend on a `NotebookHost` interface, not `vscode`
-globals, so they are testable with a fake. Cells are resolved by `metadata.id` or index. Save
-after the run only if the document had no unsaved edits before it. `bun run package` builds a
-local VSIX.
-
-## [ ] Tests
-
-Handler tests with a fake `NotebookHost` (source mismatch, unsaved document not saved, timeout
-interrupts). Pi client tests against a mock bridge and temp connection files (missing, dead pid,
-bad token, not open, success). One activation smoke test via `@vscode/test-electron`. Real
-VSCode+Jupyter execution stays a documented manual smoke test until the semantics stabilize.
-
-## [ ] Docs
-
-Update `CODE.md` once bridge files exist. Document VSIX install/dev flow and execution limits.
+One `@vscode/test-electron` test that activates the extension and sees the connection file. Only
+if the manual smoke test shows activation is fragile; it downloads VSCode in CI.
 
 ## Not doing
 

@@ -7,5 +7,5 @@ Pi executes single cells through the VSCode bridge in the kernel the user alread
 - The bridge returns the executed cell's outputs in its response. It saves afterwards only if the document had no unsaved edits before the run, so it never commits the user's own unsaved work.
 - Cells are found by `cellId` through VSCode's `metadata.id` (the ipynb serializer preserves nbformat ids), or by index. A cell created in VSCode since the last save has no id until it is saved.
 - One cell per call. Whole-notebook runs stay on `notebook_run_all` (fresh kernel).
-- No bridge window with the notebook open, or no kernel selected: fail with instructions. The bridge never opens notebooks or kernel pickers itself.
+- No bridge window with the notebook open, or no running kernel: fail with instructions. The bridge never opens notebooks or kernel pickers itself. Jupyter's API only sees started kernels, so the user selects one and runs any cell once.
 - Timeouts and Esc interrupt the kernel rather than leaving it busy.
