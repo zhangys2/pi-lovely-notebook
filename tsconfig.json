@@ -4,6 +4,7 @@
 		"module": "ESNext",
 		"lib": ["ES2022"],
 		"moduleResolution": "Bundler",
+		"customConditions": ["bun"],
 		"strict": true,
 		"noUncheckedIndexedAccess": true,
 		"exactOptionalPropertyTypes": true,
