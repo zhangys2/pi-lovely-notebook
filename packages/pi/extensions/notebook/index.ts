@@ -2,6 +2,8 @@ import { dirname, isAbsolute, resolve } from "node:path"
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent"
 import { generateDiffString, keyHint, renderDiff, resizeImage, withFileMutationQueue } from "@earendil-works/pi-coding-agent"
 import { Text } from "@earendil-works/pi-tui"
+// Core's TypeScript source, not dist: pi's Node build loads extensions through jiti, which compiles
+// it but resolves like Node, so the `bun` condition never applies and dist may not be built.
 import {
 	formatCellOutputs,
 	loadNotebook,
@@ -26,7 +28,7 @@ import {
 	readCellAtIndex,
 	readNotebook,
 	resolveCellIndex
-} from "@xl0/lovely-notebook"
+} from "@xl0/lovely-notebook/source"
 import { type TSchema, Type } from "typebox"
 import { bridgeDirectory, executeInBridge } from "./bridge"
 

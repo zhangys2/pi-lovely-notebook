@@ -31,7 +31,11 @@ bun-only, which is the wrong bet for an MCP server. `bun run release` builds fir
 - mcp: one `dist/bin.js` bundle from `src/bin.ts`, SDK/typebox/core external. `bin.ts` exists so
   the published entry connects the transport without an `import.meta.main` guard — bun compiles
   that to `__require.main`, which throws under node.
-- pi: source only. Pi is a bun app and loads TypeScript extensions directly.
+- pi: source only. Pi's npm (Node) build loads extensions through jiti, which compiles TypeScript
+  but resolves packages like Node, so core's `bun` condition never applies there. The Pi adapter
+  therefore imports core as `@xl0/lovely-notebook/source` (an export straight to `src/index.ts`,
+  shipped in the core package), which jiti compiles in the repo and inside a real
+  `node_modules` alike. Importing the bare specifier made Pi require a built `dist/`.
 
 ## Core
 
