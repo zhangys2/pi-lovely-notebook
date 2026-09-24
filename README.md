@@ -40,6 +40,7 @@ Notebooks are nbformat 4 only. Every tool acts on one cell, selected by `cellId`
 | `notebook_clear_outputs` | Drop outputs of one cell, or every cell when none is selected; keep source and execution count |
 | `notebook_read_cell_output` | One output, as text or image (index optional for single-output cells) |
 | `notebook_read_cell_attachment` | One image pasted into a markdown cell, by its `attachment:` key |
+| `notebook_run_all` | Pi only: run the whole notebook in a fresh kernel and save outputs (needs Jupyter on PATH) |
 
 Mutations preserve cell ids, metadata, and outputs. Notebooks without cell ids stay that way —
 address their cells by index.

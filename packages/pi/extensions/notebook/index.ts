@@ -1,8 +1,9 @@
-import { isAbsolute, resolve } from "node:path"
+import { dirname, isAbsolute, resolve } from "node:path"
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent"
 import { generateDiffString, keyHint, renderDiff, resizeImage, withFileMutationQueue } from "@earendil-works/pi-coding-agent"
 import { Text } from "@earendil-works/pi-tui"
 import {
+	loadNotebook,
 	type NotebookSourceChangeObserver,
 	type NotebookToolContent,
 	notebookChangeCellTypeTool,
@@ -22,7 +23,7 @@ import {
 	notebookWriteCellTool,
 	parseToolArguments
 } from "@xl0/lovely-notebook"
-import type { TSchema } from "typebox"
+import { type TSchema, Type } from "typebox"
 
 type NotebookRenderTheme = Parameters<NonNullable<Parameters<ExtensionAPI["registerTool"]>[0]["renderCall"]>>[1]
 type NotebookRenderArgs = {
@@ -232,6 +233,11 @@ const notebookTools: NotebookToolEntry[] = [
 	}
 ]
 
+const notebookRunAllParams = Type.Object({
+	path: Type.String({ description: "Path to an .ipynb notebook." }),
+	timeoutSeconds: Type.Optional(Type.Integer({ minimum: 1, description: "Limit for the whole run, in seconds. Defaults to 600." }))
+})
+
 export default function notebookExtension(pi: ExtensionAPI) {
 	// Guidelines alone don't stop models reaching for read/edit on a notebook; they get escaped
 	// JSON, and a raw-JSON edit bypasses every structural check the notebook tools make.
@@ -280,4 +286,48 @@ export default function notebookExtension(pi: ExtensionAPI) {
 			}
 		})
 	}
+
+	// Interim execution: a fresh kernel per run through nbconvert, so no kernel state lives in pi.
+	// The VSCode bridge in PLAN.md is the real answer for per-cell runs in the user's kernel.
+	pi.registerTool({
+		name: "notebook_run_all",
+		label: "Notebook Run All",
+		description:
+			"Run every cell of a notebook top to bottom in a fresh Jupyter kernel and save the outputs. Requires Jupyter (jupyter nbconvert) on PATH.",
+		promptSnippet: "Run a whole notebook in a fresh kernel and save its outputs.",
+		promptGuidelines: [
+			"notebook_run_all: fresh kernel every run, nothing carries over; cells after an error still run, so fix the first error first; needs Jupyter installed."
+		],
+		parameters: notebookRunAllParams,
+		prepareArguments: args => parseToolArguments(notebookRunAllParams, args),
+		renderCall: (args, theme) => renderNotebookCall("notebook_run_all", args as NotebookRenderArgs, theme),
+		renderResult: (result, { expanded }, theme) => renderNotebookTextResult(result as NotebookToolRenderResult, expanded, theme),
+		async execute(_toolCallId, params, signal, _onUpdate, ctx) {
+			const path = isAbsolute(params.path) ? params.path : resolve(ctx.cwd, params.path)
+			const timeoutSeconds = params.timeoutSeconds ?? 600
+			return withFileMutationQueue(path, async (): Promise<NotebookToolRenderResult> => {
+				// --allow-errors: without it nbconvert writes nothing at all on the first error.
+				// timeout=-1: the default 30s per cell kills real work; the whole run is bounded instead.
+				// record_timing=False: otherwise every cell gains timestamp metadata, churning git diffs.
+				const args = ["nbconvert", "--to", "notebook", "--execute", "--inplace", "--allow-errors"]
+				args.push("--ExecutePreprocessor.timeout=-1", "--ExecutePreprocessor.record_timing=False", path)
+				const result = await pi.exec("jupyter", args, { cwd: dirname(path), timeout: timeoutSeconds * 1000, ...(signal && { signal }) })
+				if (result.killed) throw new Error(`Run stopped (timed out after ${timeoutSeconds}s or aborted); ${path} was left unchanged.`)
+				if (result.code !== 0) {
+					const stderr = result.stderr.trim().split("\n").slice(-20).join("\n")
+					throw new Error(`jupyter nbconvert exited with code ${result.code}. Is Jupyter installed and on PATH?\n${stderr}`)
+				}
+				const notebook = await loadNotebook(path)
+				const failed = notebook.cells.flatMap((cell, index) =>
+					cell.outputs?.some(output => output.output_type === "error") ? [cell.id ?? `index ${index}`] : []
+				)
+				const status =
+					failed.length === 0
+						? `Ran ${path}: no errors.`
+						: `Ran ${path}: errors in cell(s) ${failed.join(", ")}. Cells after the first error still ran.`
+				// Reading through the summary tool also re-arms the stale guard for the file nbconvert rewrote.
+				return { content: [{ type: "text", text: status }, ...(await notebookSummaryTool.run({ path }))], details: undefined }
+			})
+		}
+	})
 }

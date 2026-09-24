@@ -157,6 +157,12 @@ cells' outputs) and the count is reported, since nothing else would show the los
   do it via `stripAtPrefix`; current models don't need it).
 - Every tool runs under `withFileMutationQueue(normalizedPath, ...)` — reads too, since Pi
   executes tools in parallel.
+- `notebook_run_all` (Pi-only, registered outside the table since it needs the abort signal):
+  `jupyter nbconvert --execute --inplace` via `pi.exec`, cwd = notebook dir. Flags matter:
+  `--allow-errors` (without it nothing is written on the first error, so cells after an error
+  still run), `ExecutePreprocessor.timeout=-1` (default 30s/cell; the whole run is bounded by
+  `timeoutSeconds` instead), `record_timing=False` (else per-cell timestamp metadata churns
+  diffs). Returns an error-cell status line plus the summary, which re-arms the stale guard.
 - Write, edit, insert, delete and merge render a source diff with Pi's standard diff UI, built
   from the core `onChange` callback, so the notebook is loaded once per call. Type change, move
   and clear-outputs leave source untouched and keep their text result.
@@ -174,7 +180,8 @@ cells' outputs) and the count is reported, since nothing else would show the los
 
 ## Tests and tooling
 
-- `bun test` at root: 111 tests, green.
+- `bun test` at root: 113 tests, green. The real-kernel `notebook_run_all` test skips when
+  `jupyter` isn't on PATH, which includes CI.
 - `.gitattributes` forces LF on checkout: biome requires it, and fixtures are byte-exact save oracles.
 - `packages/core/test/notebook-core.test.ts` covers parse/validation, pure ops, formatting,
   load/save roundtrips. One `notebook-*.tool.test.ts` per tool, one
@@ -226,4 +233,6 @@ Tool-set prompt cost, measured at 14 tools: ~8.4K chars of schema + 0.9K of guid
   so the `^0.1.0` core dep in the Pi/MCP packages resolves.
 - Notebooks not already in Jupyter's canonical form are reformatted once on first save.
 - No-id notebooks depend on index selectors.
-- Execution is not implemented; see `PLAN.md`.
+- Execution is whole-notebook, fresh-kernel only (`notebook_run_all`); no per-cell runs in a live
+  kernel until the VSCode bridge in `PLAN.md`. nbconvert writes LF, so a CRLF notebook is
+  rewritten by a run.
