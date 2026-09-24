@@ -38,27 +38,42 @@ function toNbformat(output: vscode.NotebookCellOutput): object {
 	}
 }
 
+// Measured: Jupyter's Win32 interrupt took ~15s to stop a time.sleep in the smoke test.
+const INTERRUPT_GRACE_MS = 30_000
+
+/** Resolves true when `ended` settles first, false on the timer or abort. */
+function within(ended: Promise<void>, ms: number, signal?: AbortSignal): Promise<boolean> {
+	return new Promise(settle => {
+		const timer = setTimeout(() => settle(false), ms)
+		signal?.addEventListener("abort", () => settle(false), { once: true })
+		void ended.then(() => {
+			clearTimeout(timer)
+			settle(true)
+		})
+	})
+}
+
 async function runCell(document: vscode.NotebookDocument, index: number, timeoutMs: number, signal?: AbortSignal): Promise<RunResult> {
 	const cell = document.cellAt(index)
 	const target = { ranges: [{ start: index, end: index + 1 }], document: document.uri }
-	const disposables: vscode.Disposable[] = []
-	const result = await new Promise<RunResult>(settle => {
-		// Subscribe before starting, so a fast cell cannot finish unobserved. A new end time only
-		// appears once this run completes; the previous summary never fires a change.
-		disposables.push(
-			vscode.workspace.onDidChangeNotebookDocument(event => {
-				if (event.notebook !== document) return
-				if (event.cellChanges.some(change => change.cell === cell && change.executionSummary?.timing?.endTime !== undefined)) settle("done")
-			})
-		)
-		const timer = setTimeout(() => settle("timeout"), timeoutMs)
-		disposables.push({ dispose: () => clearTimeout(timer) })
-		signal?.addEventListener("abort", () => settle("aborted"), { once: true })
-		void vscode.commands.executeCommand("notebook.cell.execute", target)
+	let subscription: vscode.Disposable | undefined
+	// Subscribe before starting, so a fast cell cannot finish unobserved. A new end time only
+	// appears once this run completes; the previous summary never fires a change.
+	const ended = new Promise<void>(resolve => {
+		subscription = vscode.workspace.onDidChangeNotebookDocument(event => {
+			if (event.notebook !== document) return
+			if (event.cellChanges.some(change => change.cell === cell && change.executionSummary?.timing?.endTime !== undefined)) resolve()
+		})
 	})
-	for (const disposable of disposables) disposable.dispose()
-	if (result !== "done") await vscode.commands.executeCommand("notebook.cell.cancelExecution", target)
-	return result
+	try {
+		void vscode.commands.executeCommand("notebook.cell.execute", target)
+		if (await within(ended, timeoutMs, signal)) return "done"
+		// Not awaited: the command itself can block for the whole slow Win32 interrupt.
+		void vscode.commands.executeCommand("notebook.cell.cancelExecution", target)
+		return (await within(ended, INTERRUPT_GRACE_MS)) ? "interrupted" : "still-running"
+	} finally {
+		subscription?.dispose()
+	}
 }
 
 export function vscodeNotebookHost(jupyter: Jupyter): NotebookHost {
@@ -77,7 +92,7 @@ export function vscodeNotebookHost(jupyter: Jupyter): NotebookHost {
 						const id = cell.metadata["id"]
 						return { source: cell.document.getText(), ...(typeof id === "string" && { id }) }
 					}),
-				hasRunningKernel: async () => (await jupyter.kernels.getKernel(document.uri)) !== undefined,
+				kernelStatus: async () => (await jupyter.kernels.getKernel(document.uri))?.status,
 				execute: (index, timeoutMs, signal) => runCell(document, index, timeoutMs, signal),
 				outputs: index => document.cellAt(index).outputs.map(toNbformat),
 				save: async () => {

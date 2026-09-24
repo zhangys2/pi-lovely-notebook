@@ -26,12 +26,15 @@ Execution is Pi-only; the MCP server stays file-only.
 - Protocol: one endpoint `POST /execute-cell`; Pi tries each live window, no discovery method.
 - Pi tool `notebook_execute_cell`, bridge package with fake-host tests, local VSIX, docs.
 
-## [ ] Manual smoke test in real VSCode + Jupyter
+## [x] Manual smoke test in real VSCode + Jupyter
 
-`vscode-host.ts` is untested against the real APIs. Install the VSIX, open a notebook, start a
-kernel, then from pi: run a cell by id and by index; print, rich output, image, error; unsaved
-edit elsewhere (runs, not saved); edited cell (source mismatch); long cell with Esc and with
-`timeoutSeconds` (interrupted); no running kernel; two windows. Fix what breaks.
+Passed on Windows; it found and fixed stuck-kernel detection, premature "interrupted", and
+connection files left by reloads.
+
+## [ ] Leftover smoke checks
+
+Two VSCode windows. Esc from a live pi session (the smoke used a driver script, `timeoutSeconds`
+only). Re-run the timeout check once after the non-awaited cancel fix.
 
 ## [ ] Activation smoke test
 
