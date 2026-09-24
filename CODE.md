@@ -119,7 +119,14 @@ Tools: `notebook_summary`, `notebook_search`, `notebook_create`, `notebook_read_
 `notebook_change_cell_type`, `notebook_edit_cell`, `notebook_insert`, `notebook_delete`,
 `notebook_move`, `notebook_merge`, `notebook_clear_outputs`, `notebook_read_cell_output`,
 `notebook_read_cell_attachment`. All but summary and search are single-cell and accept `cellId`
-or 0-based `index` (`notebook_insert.index = -1` appends).
+or 0-based `index` (`notebook_insert.index = -1` appends). Deliberate ADR-0005 exception:
+`notebook_clear_outputs` with no selector clears every code cell, since whole-notebook cleanup
+is one logical operation, not N edits.
+
+`parseToolArguments(schema, args)` is the adapters' argument gate: typebox `Convert` then
+`Check`, throwing one line per problem, with enum errors listing the allowed values (typebox's
+own message omits them, and wrong enum values are the mistake models make). MCP calls it before
+running; Pi calls it from `prepareArguments`, which runs ahead of Pi's own validation.
 
 Notable tool semantics: `notebook_create` writes with `wx` so an existing path fails with EEXIST
 in the kernel, never through a check-then-write window — replacing a notebook with an empty one
@@ -157,7 +164,7 @@ cells' outputs) and the count is reported, since nothing else would show the los
 `packages/mcp/src/server.ts` (`bun packages/mcp/src/bin.ts`, or the `lovely-notebook-mcp` bin)
 
 - Low-level SDK `Server` with `tools/list`/`tools/call`; typebox schemas pass through verbatim
-  as `inputSchema`, args checked with `Value.Check`; failures return `isError` text.
+  as `inputSchema`, args go through `parseToolArguments`; failures return `isError` text.
 - One global promise-chain queue: every tool call runs to completion before the next starts.
   Calls are short single-file read-parse-writes, so this costs nothing and preserves call order.
 - Relative paths resolve against the server process startup cwd.
@@ -165,7 +172,7 @@ cells' outputs) and the count is reported, since nothing else would show the los
 
 ## Tests and tooling
 
-- `bun test` at root: 106 tests, green.
+- `bun test` at root: 110 tests, green.
 - `.gitattributes` forces LF on checkout: biome requires it, and fixtures are byte-exact save oracles.
 - `packages/core/test/notebook-core.test.ts` covers parse/validation, pure ops, formatting,
   load/save roundtrips. One `notebook-*.tool.test.ts` per tool, one
@@ -212,7 +219,6 @@ cellId/index selectors. Outputs are preserved on mutation. No `NotebookSession` 
   The server is registered with Claude Code at local scope for dogfooding, not in the repo.
 - Not published to npm yet; READMEs already document the npm install paths. Publish core first
   so the `^0.1.0` core dep in the Pi/MCP packages resolves.
-- Pi surfaces raw schema-validator messages instead of friendly allowed-value hints.
 - Notebooks not already in Jupyter's canonical form are reformatted once on first save.
 - No-id notebooks depend on index selectors.
 - Execution is not implemented; see `PLAN.md`.

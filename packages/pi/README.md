@@ -22,7 +22,7 @@ pi -e npm:@xl0/pi-lovely-notebook           # try it for one run
 | `notebook_delete` | Delete a cell |
 | `notebook_move` | Move a cell relative to another |
 | `notebook_merge` | Merge with the adjacent same-type cell |
-| `notebook_clear_outputs` | Drop outputs, keep source and execution count |
+| `notebook_clear_outputs` | Drop outputs of one cell, or every cell when none is selected; keep source and execution count |
 | `notebook_read_cell_output` | One output, as text or image (index optional for single-output cells) |
 | `notebook_read_cell_attachment` | One image pasted into a markdown cell, by its `attachment:` key |
 

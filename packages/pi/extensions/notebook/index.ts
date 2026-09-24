@@ -19,8 +19,10 @@ import {
 	notebookSearchTool,
 	notebookSummaryTool,
 	notebookToolGuidelines,
-	notebookWriteCellTool
+	notebookWriteCellTool,
+	parseToolArguments
 } from "@xl0/lovely-notebook"
+import type { TSchema } from "typebox"
 
 type NotebookRenderTheme = Parameters<NonNullable<Parameters<ExtensionAPI["registerTool"]>[0]["renderCall"]>>[1]
 type NotebookRenderArgs = {
@@ -131,7 +133,7 @@ function renderNotebookDiffResult(result: NotebookToolRenderResult, expanded: bo
 type AnyNotebookTool = {
 	name: string
 	description: string
-	params: object
+	params: TSchema
 	run: (params: never, onChange?: NotebookSourceChangeObserver) => Promise<NotebookToolContent>
 }
 
@@ -253,6 +255,8 @@ export default function notebookExtension(pi: ExtensionAPI) {
 			promptSnippet: entry.promptSnippet,
 			...(entry.promptGuidelines && { promptGuidelines: entry.promptGuidelines }),
 			parameters: tool.params,
+			// Runs before pi's own validation, whose enum errors don't name the allowed values.
+			prepareArguments: args => parseToolArguments(tool.params, args),
 			renderCall: (args, theme) =>
 				entry.readStyleRender
 					? renderNotebookReadCall(tool.name, args as NotebookRenderArgs, theme)

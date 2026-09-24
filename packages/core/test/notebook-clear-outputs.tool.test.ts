@@ -41,3 +41,17 @@ test("runNotebookClearOutputs fails on markdown cells", async () => {
 		await fixture.cleanup()
 	}
 })
+
+test("runNotebookClearOutputs without a selector clears every code cell", async () => {
+	const fixture = await copyFixture("lovely-history.ipynb")
+
+	try {
+		const counts = readAllCells(await loadNotebook(fixture.path)).map(cell => cell.executionCount)
+		const result = await notebookClearOutputsTool.run({ path: fixture.path })
+		expect(firstText(result)).toBe(`Cleared 6 output(s) from 6 code cell(s) in ${fixture.path}.`)
+		expect(firstText(await notebookSummaryTool.run({ path: fixture.path }))).not.toMatch(/outputs="[1-9]/)
+		expect(readAllCells(await loadNotebook(fixture.path)).map(cell => cell.executionCount)).toEqual(counts)
+	} finally {
+		await fixture.cleanup()
+	}
+})
