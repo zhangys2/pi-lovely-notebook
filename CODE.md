@@ -175,7 +175,9 @@ cells' outputs) and the count is reported, since nothing else would show the los
   (default: this repo's parent), on copies: parse, summary, cell/output/attachment reads, then a
   save that must not lose content, churn a canonical file, or reformat unstably. 312 real
   notebooks (nbformat 4.0-4.5, 136MB) pass in ~3s.
-- `bun run check` = `tsgo --noEmit` + `biome check`. Biome 2.4.14, git-aware, 140 cols, tabs,
+- CI (`.github/workflows/ci.yml`): `bun install --frozen-lockfile`, `bun run check`, `bun test`
+  on Ubuntu and Windows. `bun.lock` is committed so dev and CI resolve the same versions.
+- `bun run check` = `tsgo --noEmit` + `biome check`. Biome 2.5.14, git-aware, 140 cols, tabs,
   LF, semicolons as needed. tsconfig is strict (`noUncheckedIndexedAccess`,
   `exactOptionalPropertyTypes`, `noPropertyAccessFromIndexSignature`, ...) and uses `bun-types`.
 
@@ -200,9 +202,6 @@ cellId/index selectors. Outputs are preserved on mutation. No `NotebookSession` 
 
 ## Gaps
 
-- Text reads are bounded, but byte truncation slices JavaScript characters rather than UTF-8
-  bytes. Non-ASCII single lines can exceed the 50KB ceiling and report a negative remaining-char
-  count. SVG attachment reads now support line slices and continuation offsets.
 - Verification: tests, direct Pi tool calls on a copied fixture, `bun run tool` smoke runs, a
   stub-`ExtensionAPI` registration check, and a full pass of all 13 tools through Claude Code
   against the MCP server (reads, mutations, images, attachments, error paths, concurrent calls).
