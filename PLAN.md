@@ -1,72 +1,68 @@
 # Plan
 
-Done: file-oriented notebook tools (summary, read, edit, structural mutation, outputs,
-attachments) over a shared core, shipped as a Pi extension and a stdio MCP server.
+Done: file-oriented notebook tools (summary, search, read, edit, structural mutation, outputs,
+attachments) over a shared core, shipped as a Pi extension and a stdio MCP server. Interim
+execution: `notebook_run_all` runs a whole notebook in a fresh kernel through nbconvert.
 
-Interim done: `notebook_run_all` runs a whole notebook in a fresh kernel through nbconvert. It
-has no live kernel state and can't run single cells, so the bridge below is still the goal.
-
-Next: execution. Pi should run cells of notebooks the user already has open in VSCode, using the
-kernel VSCode already selected — through a narrow companion VSCode extension in this repo, not by
-implementing Jupyter kernel/session management inside Pi.
+Next: execute single cells in the kernel the user already selected in VSCode, through a companion
+VSCode extension (the **Bridge**, see `CONTEXT.md`). Design settled in ADR-0010 (live document
+behind a source match) and ADR-0011 (localhost HTTP, per-user discovery).
 
 Why: VSCode/Jupyter owns the live document, kernel selection, dirty state, output UI and
 interactive execution semantics. Bridging to that is cheap; reimplementing it is not.
-Execution is a Pi-only concern — MCP hosts bring their own IDE execution, so the MCP server
-stays file-only.
+Execution is Pi-only; the MCP server stays file-only.
 
 ## Ground rules
 
 - Keep the seams: `packages/core/src/notebook.ts` stays pure notebook JSON (no kernel code),
   `packages/core/src/tools.ts` stays the runner/test seam,
   `packages/pi/extensions/notebook/index.ts` stays the Pi adapter seam.
-- Bridge lives here as another `packages/*`, exposing a narrow purpose-built RPC surface —
-  not generic VSCode APIs.
-- Execution goes through the same path normalization and per-file queue as mutation, since it
-  can save the file.
-- Fail honestly ("notebook not open in VSCode") rather than pretend Pi has kernel state.
+- Bridge is another `packages/*` with a narrow purpose-built RPC surface, not generic VSCode APIs.
+- Execution goes through the same path normalization and per-file queue as mutation.
+- Fail honestly ("open it in VSCode and select a kernel") rather than pretend Pi has kernel state.
 
-## [ ] Protocol and open decisions
+## [ ] Protocol
 
-Shared request/response types in their own package. VSCode side publishes connection info + token
-to a discoverable file under the project (current guess: `.pi/notebook-vscode-bridge.json`); Pi
-reads it and calls the bridge. Methods: `health`, `listOpenNotebooks`, `executeCell`, `executeAll`,
-maybe a separate `saveNotebook`.
+Localhost HTTP, bearer token, Host-header check. Connection file per window:
+`~/.pi/agent/vscode-bridge/<pid>.json` = `{ port, token, workspaceFolders }`; Pi drops files with
+dead pids. Request/response types live in the bridge package; Pi imports them type-only.
 
-Settle before writing code: transport (localhost HTTP vs unix socket); token generation/storage;
-behavior when the VSCode document is dirty or structurally diverged from disk, which decides
-whether `cellId` can be mapped to an index at all. ADRs needed for the same-repo companion
-extension and for VSCode-owned execution semantics.
+Methods, all keyed by absolute notebook path:
+- `health`
+- `hasNotebook(path)`: open in this window, and whether a kernel is selected.
+- `executeCell({ path, cellId?|index?, expectedSource, timeoutSeconds })` → outputs of that cell,
+  whether it saved, or a typed failure: not open, no kernel, cell not found, source mismatch,
+  timed out (kernel interrupted).
 
-## [ ] Pi-side execution tools
+## [ ] Pi-side tool
 
-`notebook_execute_cell({ path, cellId?|index?, saveAfter? })` and
-`notebook_execute_all({ path, saveAfter? })`, backed by a bridge discovery/client module under
-`packages/pi/extensions/notebook/`. `saveAfter` defaults true so the existing disk-based tools can
-read outputs afterwards. Prompt guidelines must state the VSCode requirement.
+`notebook_execute_cell({ path, cellId?|index?, timeoutSeconds? })` (default 600s). Reads the disk
+cell to build `expectedSource`, finds the bridge window, calls `executeCell`, and returns the
+outputs in the same shape as `notebook_read_cell_output`. Esc aborts, and the bridge interrupts
+the kernel. After a bridge save, re-read through core so the stale guard re-arms. Guidelines state
+the VSCode requirement and the source-match failure.
 
-## [ ] VSCode bridge package
+## [ ] Bridge package
 
-Activation, local RPC server with token auth, connection file written on activate and removed on
-deactivate, notebook adapter over the VSCode Notebook API, optional save after execution. Handlers
-depend on a `NotebookHost` interface rather than `vscode` globals so they are testable with a fake.
-Execute by index first; by cell id only if VSCode exposes stable ipynb ids, otherwise document the
-limitation.
+Activates on `onNotebook:jupyter-notebook`. HTTP server, token, connection file written on
+activate and removed on deactivate. Handlers depend on a `NotebookHost` interface, not `vscode`
+globals, so they are testable with a fake. Cells are resolved by `metadata.id` or index. Save
+after the run only if the document had no unsaved edits before it. `bun run package` builds a
+local VSIX.
 
 ## [ ] Tests
 
-Protocol unit tests. Pi client tests against a mock bridge server and a temp connection file
-covering missing file, auth/server failure, notebook-not-open, success. Handler tests with a fake
-`NotebookHost`. One activation/server smoke test via `@vscode/test-electron`. Real VSCode+Jupyter
-execution stays a documented manual smoke test until the semantics stabilize. Keep `bun test` and
-`bun run check` green.
+Handler tests with a fake `NotebookHost` (source mismatch, unsaved document not saved, timeout
+interrupts). Pi client tests against a mock bridge and temp connection files (missing, dead pid,
+bad token, not open, success). One activation smoke test via `@vscode/test-electron`. Real
+VSCode+Jupyter execution stays a documented manual smoke test until the semantics stabilize.
 
 ## [ ] Docs
 
-Update `CODE.md` once bridge files exist. Document the companion extension's install/dev flow and
-the execution limitations.
+Update `CODE.md` once bridge files exist. Document VSIX install/dev flow and execution limits.
 
 ## Not doing
 
 Persistent Jupyter kernels inside Pi. A generic VSCode API bridge. Replacing the disk-based
-notebook tools. Automated end-to-end kernel execution tests before the bridge stabilizes.
+notebook tools. Live-kernel run-all (use `notebook_run_all`). Opening notebooks or kernel pickers
+from the bridge. Marketplace publishing before the protocol settles.

@@ -215,7 +215,8 @@ cells' outputs) and the count is reported, since nothing else would show the los
 
 ## Decisions
 
-ADRs in `docs/adr/`. Core stays pure and adapter-free; publish core once and keep Pi/MCP thin.
+ADRs in `docs/adr/`; domain terms (disk notebook, live document, bridge, source match) in
+`CONTEXT.md`. Core stays pure and adapter-free; publish core once and keep Pi/MCP thin.
 Notebook JSON is parsed directly, no nbformat dependency. Tools are one-cell-at-a-time with dual
 cellId/index selectors. Outputs are preserved on mutation. No `NotebookSession` abstraction —
 `mutateNotebook` covers the only real backend (disk).
