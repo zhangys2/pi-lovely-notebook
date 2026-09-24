@@ -17,6 +17,7 @@ import {
 	notebookReadCellAttachmentTool,
 	notebookReadCellTool,
 	notebookReadOutputTool,
+	notebookSearchTool,
 	notebookSummaryTool,
 	notebookToolGuidelines,
 	notebookWriteCellTool,
@@ -27,6 +28,7 @@ import {
 type NotebookRenderTheme = Parameters<NonNullable<Parameters<ExtensionAPI["registerTool"]>[0]["renderCall"]>>[1]
 type NotebookRenderArgs = {
 	path?: string
+	pattern?: string
 	cellId?: string
 	index?: number
 	targetCellId?: string
@@ -85,6 +87,7 @@ function formatArg(name: string, value: string | number | boolean | undefined): 
 function renderNotebookCall(name: string, args: NotebookRenderArgs, theme: NotebookRenderTheme): Text {
 	const parts = [
 		shortPath(args.path),
+		formatArg("pattern", args.pattern),
 		formatArg("cell", args.cellId ?? args.index),
 		formatArg("target", args.targetCellId ?? args.targetIndex),
 		formatArg("out", args.outputIndex),
@@ -175,6 +178,12 @@ const notebookTools: NotebookToolEntry[] = [
 		promptGuidelines: notebookToolGuidelines
 	},
 	{
+		tool: notebookSearchTool,
+		label: "Notebook Search",
+		promptSnippet: "Find cells and source lines matching a regex; returns cell ids and 1-based line numbers.",
+		renderResult: "text"
+	},
+	{
 		tool: notebookCreateTool,
 		label: "Notebook Create",
 		promptSnippet: "Create a new empty .ipynb notebook. Fails if the path already exists."
@@ -241,6 +250,19 @@ const notebookTools: NotebookToolEntry[] = [
 ]
 
 export default function notebookExtension(pi: ExtensionAPI) {
+	// Guidelines alone don't stop models reaching for read/edit on a notebook; they get escaped
+	// JSON, and a raw-JSON edit bypasses every structural check the notebook tools make.
+	pi.on("tool_call", event => {
+		if (!["read", "edit", "write", "grep"].includes(event.toolName)) return undefined
+		const { path, glob } = event.input as { path?: unknown; glob?: unknown }
+		const targets = [path, glob].filter(value => typeof value === "string")
+		if (!targets.some(target => /\.ipynb$/i.test(target))) return undefined
+		return {
+			block: true,
+			reason: `${event.toolName} on .ipynb sees escaped JSON, not cells. Use notebook_summary, notebook_search, notebook_read_cell or the notebook edit tools instead.`
+		}
+	})
+
 	for (const entry of notebookTools) {
 		const { tool } = entry
 		pi.registerTool({

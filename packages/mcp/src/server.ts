@@ -14,6 +14,7 @@ import {
 	notebookReadCellAttachmentTool,
 	notebookReadCellTool,
 	notebookReadOutputTool,
+	notebookSearchTool,
 	notebookSummaryTool,
 	notebookToolGuidelines,
 	notebookWriteCellTool
@@ -24,6 +25,7 @@ import packageJson from "../package.json" with { type: "json" }
 
 const notebookTools = [
 	notebookSummaryTool,
+	notebookSearchTool,
 	notebookCreateTool,
 	notebookReadCellTool,
 	notebookWriteCellTool,

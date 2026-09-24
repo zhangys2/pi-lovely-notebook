@@ -26,7 +26,7 @@ type DiffTool = {
 
 function registeredTool(name: string): DiffTool {
 	const tools: DiffTool[] = []
-	notebookExtension({ registerTool: (tool: DiffTool) => tools.push(tool) } as unknown as ExtensionAPI)
+	notebookExtension({ on: () => {}, registerTool: (tool: DiffTool) => tools.push(tool) } as unknown as ExtensionAPI)
 	const tool = tools.find(candidate => candidate.name === name)
 	if (tool === undefined) throw new Error(`Tool not registered: ${name}`)
 	return tool

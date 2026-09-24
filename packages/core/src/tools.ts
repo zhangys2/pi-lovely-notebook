@@ -19,6 +19,7 @@ import {
 	resolveCellIndex,
 	saveNewNotebook,
 	saveNotebook,
+	searchNotebook,
 	sliceCellSource,
 	summarizeNotebook,
 	writeCellSource
@@ -40,7 +41,8 @@ export type NotebookToolContent = (NotebookTextContent | NotebookImageContent)[]
 
 /** Model guidance shared by all adapters (pi prompt guidelines, MCP server instructions). */
 export const notebookToolGuidelines = [
-	"Notebook tools: use notebook_summary first to discover structure and cell ids.",
+	"Notebook tools: use notebook_summary first to discover structure and cell ids, or notebook_search to find specific code.",
+	"Notebook tools: never use generic read/edit/write/grep on .ipynb files; they see escaped JSON, not cells.",
 	"Notebook tools: cell and output index selectors are 0-based, line offsets are 1-based like any file read; for notebooks without stored cell ids, use index selectors.",
 	"notebook_change_cell_type and notebook_write_cell type changes clear fields incompatible with the target type.",
 	"notebook_edit_cell: replacements must match exactly and uniquely.",
@@ -104,6 +106,27 @@ export const notebookSummaryTool = {
 	description: "Summarize a Jupyter notebook by cell.",
 	params: notebookSummaryParams,
 	run: runNotebookSummary
+} as const
+
+const notebookSearchParams = Type.Object({
+	path: Type.String({ description: "Path to an .ipynb notebook." }),
+	pattern: Type.String({ description: "JavaScript regular expression matched against each line of cell source." }),
+	ignoreCase: Type.Optional(Type.Boolean({ description: "Case-insensitive match. Defaults to false." })),
+	lineOffset: Type.Optional(Type.Integer({ minimum: 1, description: "1-based line number to start reading the results from." })),
+	lineLimit: Type.Optional(Type.Integer({ minimum: 0, description: "Maximum number of result lines to read from the offset." }))
+})
+
+async function runNotebookSearch(params: Static<typeof notebookSearchParams>): Promise<NotebookToolContent> {
+	const notebook = await loadNotebook(params.path)
+	const text = searchNotebook(notebook, new RegExp(params.pattern, params.ignoreCase ? "i" : ""))
+	return [{ type: "text", text: sliceCellSource(text, params.lineOffset, params.lineLimit) }]
+}
+
+export const notebookSearchTool = {
+	name: "notebook_search",
+	description: "Find the cells and source lines matching a regular expression.",
+	params: notebookSearchParams,
+	run: runNotebookSearch
 } as const
 
 const notebookCreateParams = Type.Object({
