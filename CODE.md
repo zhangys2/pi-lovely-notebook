@@ -88,6 +88,10 @@ bun-only, which is the wrong bet for an MCP server. `bun run release` builds fir
   Pi's `path:start-end` read header assumed 1-based line numbers all along.
 - An empty slice (empty source, offset at the end, `lineLimit: 0`) returns `[Empty]` or
   `[No lines at offset N: ...]`. Tool content with no text at all reads as a failure.
+- ANSI escape codes are stripped from stream and error text on read (summary and output reads);
+  the file keeps them, since Jupyter renders them.
+- `searchNotebook` returns one `<cell>` element per matching cell with `line: text` entries,
+  1-based so they feed straight into a read's `lineOffset`. Sources only, not outputs.
 
 `packages/core/src/tools.ts` — runners + typebox schemas; `src/index.ts` re-exports both.
 
@@ -104,11 +108,11 @@ bun-only, which is the wrong bet for an MCP server. `bun run release` builds fir
 - Also exported for adapters: `notebookToolGuidelines`. Paths are used as given; resolving them
   is the adapter's job, since each host defines cwd differently.
 
-Tools: `notebook_summary`, `notebook_create`, `notebook_read_cell`, `notebook_write_cell`,
+Tools: `notebook_summary`, `notebook_search`, `notebook_create`, `notebook_read_cell`, `notebook_write_cell`,
 `notebook_change_cell_type`, `notebook_edit_cell`, `notebook_insert`, `notebook_delete`,
 `notebook_move`, `notebook_merge`, `notebook_clear_outputs`, `notebook_read_cell_output`,
-`notebook_read_cell_attachment`. All are single-cell and accept `cellId` or 0-based `index`
-(`notebook_insert.index = -1` appends).
+`notebook_read_cell_attachment`. All but summary and search are single-cell and accept `cellId`
+or 0-based `index` (`notebook_insert.index = -1` appends).
 
 Notable tool semantics: `notebook_create` writes with `wx` so an existing path fails with EEXIST
 in the kernel, never through a check-then-write window — replacing a notebook with an empty one
@@ -130,6 +134,9 @@ cells' outputs) and the count is reported, since nothing else would show the los
 - Table-driven registration: one `notebookTools` entry per core tool holding label, prompt
   snippet, render style; names/descriptions come from the core descriptors.
 - Shared tool semantics live once as namespaced guidelines on `notebook_summary`.
+- A `tool_call` hook blocks built-in `read`/`edit`/`write`/`grep` whose `path` or `glob` ends in
+  `.ipynb`, with a reason naming the notebook tools. Guidelines alone didn't stop models reading
+  escaped JSON or editing it past every structural check. `bash` is left alone.
 - Relative paths resolve against `ctx.cwd`. No `@`-mention stripping (pi's own path tools still
   do it via `stripAtPrefix`; current models don't need it).
 - Every tool runs under `withFileMutationQueue(normalizedPath, ...)` — reads too, since Pi
@@ -150,7 +157,7 @@ cells' outputs) and the count is reported, since nothing else would show the los
 
 ## Tests and tooling
 
-- `bun test` at root: 98 tests, green.
+- `bun test` at root: 103 tests, green.
 - `.gitattributes` forces LF on checkout: biome requires it, and fixtures are byte-exact save oracles.
 - `packages/core/test/notebook-core.test.ts` covers parse/validation, pure ops, formatting,
   load/save roundtrips. One `notebook-*.tool.test.ts` per tool, one
