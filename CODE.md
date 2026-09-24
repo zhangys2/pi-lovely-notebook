@@ -100,6 +100,9 @@ bun-only, which is the wrong bet for an MCP server. `bun run release` builds fir
 - Schemas are colocated with their runner and never shared. String enums go through a local
   `StringEnum` helper so providers see `type: "string"` + `enum` rather than `anyOf`/`const`.
 - `mutateNotebook(path, mutate)` consolidates load → mutate → save.
+- Source-changing runners take an optional second arg `onChange({before, after})`, called with
+  the touched cell's source only after the save succeeds (insert: empty before; delete: empty
+  after; merge: the anchor). MCP ignores it.
 - `applyExactSourceEdits` follows pi's edit tool: unique matches, no empty `oldText`, no overlaps,
   must change something. No whitespace-fuzzy fallback (pi has one; we stay exact).
 - Runners return `NotebookToolContent` (`{type:"text"}` / `{type:"image", data, mimeType}`),
@@ -141,8 +144,9 @@ cells' outputs) and the count is reported, since nothing else would show the los
   do it via `stripAtPrefix`; current models don't need it).
 - Every tool runs under `withFileMutationQueue(normalizedPath, ...)` — reads too, since Pi
   executes tools in parallel.
-- Write/edit capture source before mutation and return diff details rendered with Pi's
-  standard source diff UI.
+- Write, edit, insert, delete and merge render a source diff with Pi's standard diff UI, built
+  from the core `onChange` callback, so the notebook is loaded once per call. Type change, move
+  and clear-outputs leave source untouched and keep their text result.
 - `resolveContentImages` runs core images through Pi's `resizeImage`; unresizable ones become
   `[Image omitted: ...]` notes.
 
@@ -157,7 +161,7 @@ cells' outputs) and the count is reported, since nothing else would show the los
 
 ## Tests and tooling
 
-- `bun test` at root: 103 tests, green.
+- `bun test` at root: 104 tests, green.
 - `.gitattributes` forces LF on checkout: biome requires it, and fixtures are byte-exact save oracles.
 - `packages/core/test/notebook-core.test.ts` covers parse/validation, pure ops, formatting,
   load/save roundtrips. One `notebook-*.tool.test.ts` per tool, one

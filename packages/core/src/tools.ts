@@ -39,6 +39,13 @@ export interface NotebookImageContent {
 
 export type NotebookToolContent = (NotebookTextContent | NotebookImageContent)[]
 
+/**
+ * Source of the one cell a mutation touched, reported after the save succeeds, for adapters that
+ * render diffs. Insert has an empty `before`, delete an empty `after`; merge reports the anchor.
+ */
+export type NotebookSourceChange = { before: string; after: string }
+export type NotebookSourceChangeObserver = (change: NotebookSourceChange) => void
+
 /** Model guidance shared by all adapters (pi prompt guidelines, MCP server instructions). */
 export const notebookToolGuidelines = [
 	"Notebook tools: use notebook_summary first to discover structure and cell ids, or notebook_search to find specific code.",
@@ -194,12 +201,18 @@ const notebookWriteCellParams = Type.Object({
 	source: Type.String({ description: "New full cell source." })
 })
 
-async function runNotebookWriteCell(params: Static<typeof notebookWriteCellParams>): Promise<NotebookToolContent> {
-	await mutateNotebook(params.path, notebook => {
+async function runNotebookWriteCell(
+	params: Static<typeof notebookWriteCellParams>,
+	onChange?: NotebookSourceChangeObserver
+): Promise<NotebookToolContent> {
+	const before = await mutateNotebook(params.path, notebook => {
 		const cellIndex = resolveSelectedCellIndex(notebook, params.cellId, params.index)
+		const before = readCellAtIndex(notebook, cellIndex).source
 		writeCellSource(notebook, cellIndex, params.source)
 		if (params.type !== undefined) changeCellType(notebook, cellIndex, params.type)
+		return before
 	})
+	onChange?.({ before, after: params.source })
 	const type = params.type === undefined ? "" : ` as ${params.type}`
 	return [{ type: "text", text: `Wrote cell ${cellSelectionText(params.cellId, params.index)}${type} in ${params.path}.` }]
 }
@@ -250,10 +263,17 @@ const notebookEditCellParams = Type.Object({
 	)
 })
 
-async function runNotebookEditCell(params: Static<typeof notebookEditCellParams>): Promise<NotebookToolContent> {
-	await mutateNotebook(params.path, notebook => {
-		editCellSource(notebook, resolveSelectedCellIndex(notebook, params.cellId, params.index), params.edits)
+async function runNotebookEditCell(
+	params: Static<typeof notebookEditCellParams>,
+	onChange?: NotebookSourceChangeObserver
+): Promise<NotebookToolContent> {
+	const change = await mutateNotebook(params.path, notebook => {
+		const cellIndex = resolveSelectedCellIndex(notebook, params.cellId, params.index)
+		const before = readCellAtIndex(notebook, cellIndex).source
+		editCellSource(notebook, cellIndex, params.edits)
+		return { before, after: readCellAtIndex(notebook, cellIndex).source }
 	})
+	onChange?.(change)
 	return [
 		{
 			type: "text",
@@ -278,7 +298,10 @@ const notebookInsertParams = Type.Object({
 	source: Type.String({ description: "Source for the new cell." })
 })
 
-async function runNotebookInsert(params: Static<typeof notebookInsertParams>): Promise<NotebookToolContent> {
+async function runNotebookInsert(
+	params: Static<typeof notebookInsertParams>,
+	onChange?: NotebookSourceChangeObserver
+): Promise<NotebookToolContent> {
 	const result = await mutateNotebook(params.path, notebook => {
 		const insertIndex =
 			params.cellId === undefined && params.index === -1
@@ -286,6 +309,7 @@ async function runNotebookInsert(params: Static<typeof notebookInsertParams>): P
 				: resolveSelectedCellIndex(notebook, params.cellId, params.index) + (params.direction === "after" ? 1 : 0)
 		return insertCell(notebook, insertIndex, { type: params.type, source: params.source })
 	})
+	onChange?.({ before: "", after: params.source })
 	const anchor = params.cellId ?? (params.index === -1 ? "the end" : `index ${params.index}`)
 	const placement = params.index === -1 ? "at" : params.direction
 	return [
@@ -309,8 +333,14 @@ const notebookDeleteParams = Type.Object({
 	index: Type.Optional(Type.Integer({ minimum: 0, description: "0-based cell index to delete." }))
 })
 
-async function runNotebookDelete(params: Static<typeof notebookDeleteParams>): Promise<NotebookToolContent> {
-	await mutateNotebook(params.path, notebook => deleteCell(notebook, resolveSelectedCellIndex(notebook, params.cellId, params.index)))
+async function runNotebookDelete(
+	params: Static<typeof notebookDeleteParams>,
+	onChange?: NotebookSourceChangeObserver
+): Promise<NotebookToolContent> {
+	const deleted = await mutateNotebook(params.path, notebook =>
+		deleteCell(notebook, resolveSelectedCellIndex(notebook, params.cellId, params.index))
+	)
+	onChange?.({ before: deleted.source, after: "" })
 	return [{ type: "text", text: `Deleted cell ${cellSelectionText(params.cellId, params.index)} from ${params.path}.` }]
 }
 
@@ -363,10 +393,16 @@ const notebookMergeParams = Type.Object({
 	direction: StringEnum(["above", "below"] as const, { description: "Adjacent merge direction." })
 })
 
-async function runNotebookMerge(params: Static<typeof notebookMergeParams>): Promise<NotebookToolContent> {
-	const result = await mutateNotebook(params.path, notebook =>
-		mergeCell(notebook, resolveSelectedCellIndex(notebook, params.cellId, params.index), params.direction)
-	)
+async function runNotebookMerge(
+	params: Static<typeof notebookMergeParams>,
+	onChange?: NotebookSourceChangeObserver
+): Promise<NotebookToolContent> {
+	const { before, result } = await mutateNotebook(params.path, notebook => {
+		const anchorIndex = resolveSelectedCellIndex(notebook, params.cellId, params.index)
+		const before = readCellAtIndex(notebook, anchorIndex).source
+		return { before, result: mergeCell(notebook, anchorIndex, params.direction) }
+	})
+	onChange?.({ before, after: result.merged.source })
 	const dropped = result.droppedOutputs === 0 ? "" : ` Dropped ${result.droppedOutputs} output(s) that belonged to the removed cell.`
 	return [
 		{
