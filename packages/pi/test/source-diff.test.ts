@@ -66,6 +66,27 @@ test("notebook_write_cell returns and renders a cell-source diff", async () => {
 	}
 })
 
+test("insert, merge and delete return diffs of the cell they touched", async () => {
+	const notebook = await tempNotebook("one\n")
+	const run = (name: string, params: object) =>
+		registeredTool(name).execute("call", { path: notebook.path, ...params }, undefined, undefined, { cwd: notebook.dir })
+	try {
+		const inserted = await run("notebook_insert", { cellId: "intro", direction: "after", type: "markdown", source: "two\n" })
+		expect(inserted.details?.diff).toContain("+1 two")
+		expect(inserted.details?.diff).not.toContain("-")
+
+		const merged = await run("notebook_merge", { cellId: "intro", direction: "below" })
+		expect(merged.details?.diff).toContain("+2 two")
+
+		const deleted = await run("notebook_delete", { cellId: "intro" })
+		expect(deleted.details?.diff).toContain("-1 one")
+		expect(deleted.details?.diff).toContain("-2 two")
+		expect((await loadNotebook(notebook.path)).cells).toHaveLength(0)
+	} finally {
+		await rm(notebook.dir, { recursive: true, force: true })
+	}
+})
+
 test("notebook_edit_cell returns a cell-source diff", async () => {
 	const notebook = await tempNotebook("alpha beta\n")
 	try {
