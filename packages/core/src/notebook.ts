@@ -601,15 +601,25 @@ export function formatNotebookSummary(summary: NotebookSummary): string {
 }
 
 /**
- * Source lines matching `pattern`, grouped in one `<cell>` element per matching cell as
- * `line: text` entries. Line numbers are 1-based so they feed straight into a read's lineOffset.
+ * Lines matching `pattern`, grouped in one `<cell>` element per matching cell as `line: text`
+ * entries; with `includeOutputs`, output matches nest in `<output index mime?>` elements. Line
+ * numbers are 1-based and count the same text a read returns, so they feed straight into its
+ * lineOffset (for rich outputs, together with the `mime`).
  */
-export function searchNotebook(notebook: Notebook, pattern: RegExp): string {
+export function searchNotebook(notebook: Notebook, pattern: RegExp, includeOutputs = false): string {
+	const matchLines = (text: string) =>
+		sourceToLines(text).flatMap((line, i) => (pattern.test(line) ? [`${i + 1}: ${trimTrailingNewline(capPreviewLine(line))}`] : []))
 	const lines: string[] = []
 	notebook.cells.forEach((cell, index) => {
-		const matches = sourceToLines(cell.source).flatMap((line, i) =>
-			pattern.test(line) ? [`${i + 1}: ${trimTrailingNewline(capPreviewLine(line))}`] : []
-		)
+		const matches = matchLines(cell.source)
+		for (const [outputIndex, output] of (includeOutputs ? (cell.outputs ?? []) : []).entries()) {
+			for (const { mime, text } of searchableOutputTexts(output)) {
+				const outputMatches = matchLines(text)
+				if (outputMatches.length === 0) continue
+				const attrs = [`index=${quoteAttribute(String(outputIndex))}`, ...(mime ? [`mime=${quoteAttribute(mime)}`] : [])]
+				matches.push(`<output ${attrs.join(" ")}>`, ...outputMatches, "</output>")
+			}
+		}
 		if (matches.length === 0) return
 		const id = storedCellId(cell)
 		const attrs = [
@@ -620,6 +630,15 @@ export function searchNotebook(notebook: Notebook, pattern: RegExp): string {
 		lines.push(`<cell ${attrs.join(" ")}>`, ...matches, "</cell>")
 	})
 	return lines.length === 0 ? "[No matches]" : lines.join("\n")
+}
+
+/** The texts `readCellOutput` would return for an output: stream/error whole, rich per text-like mime. */
+function searchableOutputTexts(output: NotebookOutput): Array<{ mime?: string; text: string }> {
+	if (output.output_type === "stream") return [{ text: stripAnsi(output.text ?? "") }]
+	if (output.output_type === "error") return [{ text: stripAnsi((output.traceback ?? []).join("\n")) }]
+	return displayDataEntries(output.data ?? {})
+		.filter(entry => isTextLikeMime(entry.mime))
+		.map(({ mime, text }) => ({ mime, text }))
 }
 
 /** Ceiling for one read, whether or not the caller passed a limit. Same bounds as pi's Read tool. */

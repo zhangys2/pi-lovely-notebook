@@ -33,7 +33,7 @@ sets when it spawns the server. Absolute paths always work.
 | Tool | Does |
 | --- | --- |
 | `notebook_summary` | Structure of the whole notebook: cells, ids, outputs, short previews |
-| `notebook_search` | Regex over cell sources: matching lines grouped by cell, with line numbers |
+| `notebook_search` | Regex over cell sources (and optionally text outputs): matching lines grouped by cell, with line numbers |
 | `notebook_create` | New empty notebook (refuses to overwrite) |
 | `notebook_read_cell` | One cell's source, optionally line-sliced |
 | `notebook_write_cell` | Replace one cell's source, optionally change its type |

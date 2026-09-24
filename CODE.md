@@ -91,7 +91,9 @@ bun-only, which is the wrong bet for an MCP server. `bun run release` builds fir
 - ANSI escape codes are stripped from stream and error text on read (summary and output reads);
   the file keeps them, since Jupyter renders them.
 - `searchNotebook` returns one `<cell>` element per matching cell with `line: text` entries,
-  1-based so they feed straight into a read's `lineOffset`. Sources only, not outputs.
+  1-based so they feed straight into a read's `lineOffset`. With `outputs`, text outputs are
+  searched too, nested as `<output index mime?>` elements; they count the same text
+  `readCellOutput` returns (ANSI stripped, rich outputs per text-like mime).
 
 `packages/core/src/tools.ts` — runners + typebox schemas; `src/index.ts` re-exports both.
 
@@ -172,7 +174,7 @@ cells' outputs) and the count is reported, since nothing else would show the los
 
 ## Tests and tooling
 
-- `bun test` at root: 110 tests, green.
+- `bun test` at root: 111 tests, green.
 - `.gitattributes` forces LF on checkout: biome requires it, and fixtures are byte-exact save oracles.
 - `packages/core/test/notebook-core.test.ts` covers parse/validation, pure ops, formatting,
   load/save roundtrips. One `notebook-*.tool.test.ts` per tool, one
@@ -210,6 +212,9 @@ ADRs in `docs/adr/`. Core stays pure and adapter-free; publish core once and kee
 Notebook JSON is parsed directly, no nbformat dependency. Tools are one-cell-at-a-time with dual
 cellId/index selectors. Outputs are preserved on mutation. No `NotebookSession` abstraction —
 `mutateNotebook` covers the only real backend (disk).
+
+Tool-set prompt cost, measured at 14 tools: ~8.4K chars of schema + 0.9K of guidelines, about
+2.7K tokens (~3K with Pi snippets). Too small to justify merging tools into multiplexed schemas.
 
 ## Gaps
 
