@@ -1,5 +1,6 @@
 import { stat } from "node:fs/promises"
-import { type Static, type TUnsafe, Type } from "typebox"
+import { type Static, type TSchema, type TUnsafe, Type } from "typebox"
+import { Value } from "typebox/value"
 import type { Notebook } from "./notebook"
 import {
 	changeCellType,
@@ -56,8 +57,27 @@ export const notebookToolGuidelines = [
 	"notebook_edit_cell: replacements must match exactly and uniquely.",
 	"notebook_insert: index -1 appends.",
 	"notebook_merge: cells must be adjacent and the same type; the anchor cell id and attachments of both cells are kept, the removed cell's outputs are dropped.",
-	"notebook_clear_outputs: preserves source and execution count."
+	"notebook_clear_outputs: omit cellId and index to clear every code cell; preserves source and execution count."
 ]
+
+/**
+ * Converts (e.g. "3" to 3) and checks tool arguments for adapters, throwing one line per problem.
+ * Exists because typebox's enum message never names the allowed values, and a wrong enum value
+ * ("below", "python") is the argument mistake models actually make.
+ */
+export function parseToolArguments<T extends TSchema>(params: T, args: unknown): Static<T> {
+	const converted = Value.Convert(params, structuredClone(args))
+	if (Value.Check(params, converted)) return converted
+	const problems = [...Value.Errors(params, converted)].map(error => {
+		const path = error.instancePath.slice(1).replaceAll("/", ".") || "arguments"
+		const allowed =
+			error.keyword === "enum"
+				? `: ${(error.params as { allowedValues: unknown[] }).allowedValues.map(value => JSON.stringify(value)).join(", ")}`
+				: ""
+		return `- ${path}: ${error.message}${allowed}`
+	})
+	throw new Error(`Invalid arguments:\n${problems.join("\n")}`)
+}
 
 // String enum schema rendered as `type: "string"` + `enum`, not anyOf/const unions,
 // for providers (e.g. Google) that reject the latter.
@@ -521,23 +541,40 @@ export const notebookReadCellAttachmentTool = {
 
 const notebookClearOutputsParams = Type.Object({
 	path: Type.String({ description: "Path to an .ipynb notebook." }),
-	cellId: Type.Optional(Type.String({ description: "Code cell id whose outputs should be cleared." })),
-	index: Type.Optional(Type.Integer({ minimum: 0, description: "0-based code cell index whose outputs should be cleared." }))
+	cellId: Type.Optional(Type.String({ description: "Code cell id whose outputs should be cleared. Omit with index to clear every cell." })),
+	index: Type.Optional(
+		Type.Integer({
+			minimum: 0,
+			description: "0-based code cell index whose outputs should be cleared. Omit with cellId to clear every cell."
+		})
+	)
 })
 
 async function runNotebookClearOutputs(params: Static<typeof notebookClearOutputsParams>): Promise<NotebookToolContent> {
-	await mutateNotebook(params.path, notebook => clearCellOutputs(notebook, resolveSelectedCellIndex(notebook, params.cellId, params.index)))
-	return [
-		{
-			type: "text",
-			text: `Cleared outputs for cell ${cellSelectionText(params.cellId, params.index)} in ${params.path}.`
-		}
-	]
+	if (params.cellId !== undefined || params.index !== undefined) {
+		await mutateNotebook(params.path, notebook =>
+			clearCellOutputs(notebook, resolveSelectedCellIndex(notebook, params.cellId, params.index))
+		)
+		return [{ type: "text", text: `Cleared outputs for cell ${cellSelectionText(params.cellId, params.index)} in ${params.path}.` }]
+	}
+	// Whole-notebook clear is one logical operation (pre-commit cleanup), not N single-cell edits.
+	const { cells, outputs } = await mutateNotebook(params.path, notebook => {
+		let cells = 0
+		let outputs = 0
+		notebook.cells.forEach((cell, index) => {
+			if (cell.cell_type !== "code" || (cell.outputs ?? []).length === 0) return
+			cells++
+			outputs += (cell.outputs ?? []).length
+			clearCellOutputs(notebook, index)
+		})
+		return { cells, outputs }
+	})
+	return [{ type: "text", text: `Cleared ${outputs} output(s) from ${cells} code cell(s) in ${params.path}.` }]
 }
 
 export const notebookClearOutputsTool = {
 	name: "notebook_clear_outputs",
-	description: "Clear outputs from one code cell.",
+	description: "Clear outputs from one code cell, or from every code cell when no cell is selected.",
 	params: notebookClearOutputsParams,
 	run: runNotebookClearOutputs
 } as const

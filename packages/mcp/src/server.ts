@@ -17,9 +17,9 @@ import {
 	notebookSearchTool,
 	notebookSummaryTool,
 	notebookToolGuidelines,
-	notebookWriteCellTool
+	notebookWriteCellTool,
+	parseToolArguments
 } from "@xl0/lovely-notebook"
-import { Value } from "typebox/value"
 // The version the host reports must track the published one; npm always ships package.json.
 import packageJson from "../package.json" with { type: "json" }
 
@@ -87,15 +87,9 @@ server.setRequestHandler(CallToolRequestSchema, async request => {
 	const tool = toolsByName.get(request.params.name)
 	if (!tool) throw new Error(`Unknown tool: ${request.params.name}`)
 
-	const args = request.params.arguments ?? {}
-	if (!Value.Check(tool.params, args)) {
-		const errors = [...Value.Errors(tool.params, args)].map(error => `${error.instancePath || "/"}: ${error.message}`)
-		return { content: [{ type: "text", text: `Invalid arguments:\n${errors.join("\n")}` }], isError: true }
-	}
-
-	const rawPath = (args as { path: string }).path
-	const params = { ...args, path: isAbsolute(rawPath) ? rawPath : resolve(serverCwd, rawPath) }
 	try {
+		const args = parseToolArguments(tool.params, request.params.arguments ?? {}) as { path: string }
+		const params = { ...args, path: isAbsolute(args.path) ? args.path : resolve(serverCwd, args.path) }
 		const run = () => tool.run(params as never)
 		const content = capImages(await withQueue(run))
 		return { content }
