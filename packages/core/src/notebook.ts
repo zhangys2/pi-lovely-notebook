@@ -307,6 +307,15 @@ function previewSource(source: string): string {
 	return `${shown}\n[${lines.length - PREVIEW_MAX_LINES} more lines]`
 }
 
+// IPython colours every traceback and many libraries colour their streams. Stripped on read only;
+// the file keeps the codes, since Jupyter renders them.
+// biome-ignore lint/suspicious/noControlCharactersInRegex: matching ESC is the point
+const ANSI_ESCAPE = /\x1b\[[0-?]*[ -/]*[@-~]/g
+
+function stripAnsi(text: string): string {
+	return text.replace(ANSI_ESCAPE, "")
+}
+
 function normalizeOutputText(value: unknown): string {
 	if (typeof value === "string") return value
 	if (Array.isArray(value) && value.every(part => typeof part === "string")) return value.join("")
@@ -348,7 +357,7 @@ function summarizeOutput(output: NotebookOutput, index: number): NotebookOutputS
 	}
 
 	if (type === "stream") {
-		return [{ ...base, preview: previewSource(raw.text ?? "") }]
+		return [{ ...base, preview: previewSource(stripAnsi(raw.text ?? "")) }]
 	}
 
 	if ((type === "display_data" || type === "execute_result") && raw.data !== undefined) {
@@ -360,7 +369,7 @@ function summarizeOutput(output: NotebookOutput, index: number): NotebookOutputS
 	}
 
 	if (type === "error") {
-		let text = (raw.traceback ?? []).join("\n")
+		let text = stripAnsi((raw.traceback ?? []).join("\n"))
 		if (text.length > 0 && !text.endsWith("\n")) text += "\n"
 		return [{ ...base, preview: previewSource(text) }]
 	}
@@ -589,6 +598,28 @@ export function formatNotebookSummary(summary: NotebookSummary): string {
 	}
 
 	return lines.join("\n")
+}
+
+/**
+ * Source lines matching `pattern`, grouped in one `<cell>` element per matching cell as
+ * `line: text` entries. Line numbers are 1-based so they feed straight into a read's lineOffset.
+ */
+export function searchNotebook(notebook: Notebook, pattern: RegExp): string {
+	const lines: string[] = []
+	notebook.cells.forEach((cell, index) => {
+		const matches = sourceToLines(cell.source).flatMap((line, i) =>
+			pattern.test(line) ? [`${i + 1}: ${trimTrailingNewline(capPreviewLine(line))}`] : []
+		)
+		if (matches.length === 0) return
+		const id = storedCellId(cell)
+		const attrs = [
+			`index=${quoteAttribute(String(index))}`,
+			`type=${quoteAttribute(cell.cell_type === "markdown" ? "md" : cell.cell_type)}`
+		]
+		if (id !== undefined) attrs.splice(1, 0, `id=${quoteAttribute(id)}`)
+		lines.push(`<cell ${attrs.join(" ")}>`, ...matches, "</cell>")
+	})
+	return lines.length === 0 ? "[No matches]" : lines.join("\n")
 }
 
 /** Ceiling for one read, whether or not the caller passed a limit. Same bounds as pi's Read tool. */
@@ -849,7 +880,7 @@ export function readCellOutput(notebook: Notebook, cellIndex: number, outputInde
 		return {
 			...base,
 			mime: "text/plain",
-			text: raw.text ?? ""
+			text: stripAnsi(raw.text ?? "")
 		}
 	}
 
@@ -857,7 +888,7 @@ export function readCellOutput(notebook: Notebook, cellIndex: number, outputInde
 		return {
 			...base,
 			mime: "text/plain",
-			text: (raw.traceback ?? []).join("\n")
+			text: stripAnsi((raw.traceback ?? []).join("\n"))
 		}
 	}
 
