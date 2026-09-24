@@ -24,7 +24,8 @@ bun-only, which is the wrong bet for an MCP server. `bun run release` builds fir
 
 - core: `bun build --target node` ESM + `tsgo -p tsconfig.build.json` declarations. Its `exports`
   keeps a `bun` condition pointing at `src/`, so bun (and everything in this repo) still runs the
-  TypeScript directly and no build is needed for development.
+  TypeScript directly and no build is needed for development. Root tsconfig sets
+  `customConditions: ["bun"]` so typecheck resolves `src/` too, not the unbuilt `dist/*.d.ts`.
 - mcp: one `dist/bin.js` bundle from `src/bin.ts`, SDK/typebox/core external. `bin.ts` exists so
   the published entry connects the transport without an `import.meta.main` guard — bun compiles
   that to `__require.main`, which throws under node.
@@ -44,9 +45,10 @@ bun-only, which is the wrong bet for an MCP server. `bun run release` builds fir
   Without this a one-cell edit rewrote ~770 lines of a 13k-line notebook and buried its own diff.
   Mime-bundle and attachment values are never re-split, since parsing leaves them untouched;
   nbformat would split `text/*`, `application/javascript` and `image/svg+xml`.
-- The input file's indent is detected on parse and reused on save (Jupyter writes 1 space, Colab
-  2), kept in a `WeakMap` keyed by the notebook so it never reaches the file. VSCode does the same
-  via `detectIndent` plus in-memory `indentAmount` metadata.
+- The input file's indent and line ending are detected on parse and reused on save (Jupyter
+  writes 1 space, Colab 2; Windows autocrlf checkouts are CRLF), kept in a `WeakMap` keyed by the
+  notebook so they never reach the file. VSCode does the same for indent via `detectIndent` plus
+  in-memory `indentAmount` metadata.
 - Helpers take 0-based indexes only; selector resolution lives in the tool layer.
 - Id policy: no-id notebooks stay no-id, missing ids are never backfilled, inserted cells
   get ids only when the notebook already uses ids or `nbformat_minor >= 5`.
@@ -148,12 +150,13 @@ cells' outputs) and the count is reported, since nothing else would show the los
 
 ## Tests and tooling
 
-- `bun test` at root: 97 tests, green.
+- `bun test` at root: 98 tests, green.
+- `.gitattributes` forces LF on checkout: biome requires it, and fixtures are byte-exact save oracles.
 - `packages/core/test/notebook-core.test.ts` covers parse/validation, pure ops, formatting,
   load/save roundtrips. One `notebook-*.tool.test.ts` per tool, one
   `notebook-*.workflow.test.ts` per multi-step flow.
 - `packages/pi/test/` covers the resize/omission seam and source diffs;
-  `packages/mcp/test/file-queue.test.ts` covers realpath/symlink serialization.
+  `packages/mcp/test/queue.test.ts` covers realpath/symlink serialization.
 - Fixtures in `packages/core/test/fixtures/`, including `subtly-corrupt-images.ipynb`
   (valid-looking PNG base64 with undecodable IDAT) to pin the raw-vs-omitted image split.
 - `bun run tool -- <tool-name> '<json-args>'` prints raw tool output without launching Pi.

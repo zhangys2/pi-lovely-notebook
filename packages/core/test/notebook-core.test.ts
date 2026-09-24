@@ -410,6 +410,18 @@ describe("notebook core", () => {
 		}
 	})
 
+	test("saveNotebook keeps CRLF line endings", async () => {
+		// Windows checkouts with core.autocrlf turn notebooks CRLF; writing LF back would rewrite every line.
+		const lf = (await readFile(join(FIXTURE_DIR, "lovely-history.ipynb"), "utf8")).replaceAll("\r\n", "\n")
+		const fixture = await createTempNotebook("crlf.ipynb", lf.replaceAll("\n", "\r\n"))
+		try {
+			await saveNotebook(fixture.path, await loadNotebook(fixture.path))
+			expect(await readFile(fixture.path, "utf8")).toBe(lf.replaceAll("\n", "\r\n"))
+		} finally {
+			await fixture.cleanup()
+		}
+	})
+
 	test("saveNotebook converges on the canonical form and then stays put", async () => {
 		// This fixture is hand-written with unsorted keys: one save canonicalizes it, the next is a no-op.
 		const fixture = await copyFixture("subtly-corrupt-images.ipynb")

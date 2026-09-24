@@ -432,7 +432,10 @@ export function parseNotebook(text: string): Notebook {
 	}
 
 	const parsed = { ...notebook, cells } as Notebook
-	notebookIndents.set(parsed, detectIndent(text))
+	notebookFormats.set(parsed, {
+		indent: /\n([ \t]+)"/.exec(text.slice(0, 1000))?.[1] ?? " ",
+		eol: /\r?\n/.exec(text)?.[0] ?? "\n"
+	})
 	return parsed
 }
 
@@ -441,15 +444,12 @@ export async function loadNotebook(path: string): Promise<Notebook> {
 }
 
 /**
- * Indent of the file a notebook was parsed from, so saving reuses it: Jupyter writes 1 space,
- * Colab writes 2, and reflowing either way rewrites every line. VSCode does the same thing by
- * stashing `indentAmount` in in-memory metadata; a side table keeps it out of the file.
+ * Indent and line ending of the file a notebook was parsed from, so saving reuses them: Jupyter
+ * writes 1 space, Colab writes 2, Windows checkouts with autocrlf have CRLF, and changing any of
+ * these rewrites every line. VSCode does the same for indent by stashing `indentAmount` in
+ * in-memory metadata; a side table keeps it out of the file.
  */
-const notebookIndents = new WeakMap<Notebook, string>()
-
-function detectIndent(text: string): string {
-	return /\n([ \t]+)"/.exec(text.slice(0, 1000))?.[1] ?? " "
-}
+const notebookFormats = new WeakMap<Notebook, { indent: string; eol: string }>()
 
 /** Keys sorted at every level, the way nbformat (sort_keys=True) and VSCode's ipynb serializer write them. */
 function sortKeysRecursively(value: unknown): unknown {
@@ -476,7 +476,9 @@ function serializeNotebook(notebook: Notebook): string {
 		)
 		return { ...cell, source: sourceToLines(cell.source), ...(outputs === undefined ? {} : { outputs }) }
 	})
-	return `${JSON.stringify(sortKeysRecursively({ ...notebook, cells }), null, notebookIndents.get(notebook) ?? " ")}\n`
+	const { indent, eol } = notebookFormats.get(notebook) ?? { indent: " ", eol: "\n" }
+	// Safe: JSON.stringify escapes newlines inside strings, so every raw \n is structural.
+	return `${JSON.stringify(sortKeysRecursively({ ...notebook, cells }), null, indent)}\n`.replaceAll("\n", eol)
 }
 
 export async function saveNotebook(path: string, notebook: Notebook): Promise<void> {

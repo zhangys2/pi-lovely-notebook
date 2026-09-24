@@ -1,0 +1,2 @@
+# LF everywhere: biome enforces it, and notebook saves must round-trip byte for byte.
+* text=auto eol=lf
