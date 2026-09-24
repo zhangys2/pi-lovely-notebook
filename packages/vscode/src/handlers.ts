@@ -6,15 +6,23 @@ export interface HostCell {
 	source: string
 }
 
-export type RunResult = "done" | "timeout" | "aborted"
+/**
+ * `interrupted`: timed out or aborted, and the cell stopped after the interrupt. `still-running`:
+ * the interrupt was requested but the cell had not stopped within a grace period (Jupyter
+ * interrupts on Windows can take 15s or more).
+ */
+export type RunResult = "done" | "interrupted" | "still-running"
 
 /** One live document, as the handlers see it. The real one wraps `vscode.NotebookDocument`. */
 export interface HostDocument {
 	readonly isDirty: boolean
 	cells(): HostCell[]
-	/** Only a started kernel counts: Jupyter's API cannot see a selected-but-idle one. */
-	hasRunningKernel(): Promise<boolean>
-	/** Runs one cell to completion; on timeout or abort, interrupts it first. */
+	/**
+	 * Jupyter kernel status (`idle`, `busy`, `starting`, `dead`, ...), or undefined when no kernel
+	 * has started: Jupyter's API cannot see a selected-but-never-started one.
+	 */
+	kernelStatus(): Promise<string | undefined>
+	/** Runs one cell to completion; on timeout or abort, interrupts it and waits a grace period. */
 	execute(index: number, timeoutMs: number, signal?: AbortSignal): Promise<RunResult>
 	/** nbformat v4 output objects. */
 	outputs(index: number): object[]
@@ -43,14 +51,21 @@ export async function executeCell(host: NotebookHost, request: ExecuteCellReques
 	if (cell.source.replaceAll("\r\n", "\n") !== request.expectedSource.replaceAll("\r\n", "\n")) {
 		return fail("source-mismatch", "The cell in VSCode differs from the notebook on disk. Save or revert it in VSCode, then retry.")
 	}
-	if (!(await document.hasRunningKernel())) {
+	const status = await document.kernelStatus()
+	if (status === undefined) {
 		return fail("no-kernel", `No running kernel for ${request.path} in VSCode. Select a kernel and run any cell once, then retry.`)
+	}
+	// Busy is fine: the cell queues. Anything else (stuck starting, dead) would only wait out the timeout.
+	if (status !== "idle" && status !== "busy") {
+		return fail("no-kernel", `The kernel for ${request.path} is ${status}. Wait for it, or restart it in VSCode, then retry.`)
 	}
 
 	const wasDirty = document.isDirty
 	const result = await document.execute(index, request.timeoutSeconds * 1000, signal)
-	if (result !== "done") {
-		return fail("timeout", `The cell did not finish within ${request.timeoutSeconds}s (or was cancelled); the kernel was interrupted.`)
+	const stopped = `The cell did not finish within ${request.timeoutSeconds}s, or the run was cancelled`
+	if (result === "interrupted") return fail("timeout", `${stopped}; it was interrupted.`)
+	if (result === "still-running") {
+		return fail("timeout", `${stopped}. An interrupt was requested but the cell is still running; later runs queue behind it.`)
 	}
 	const outputs = document.outputs(index)
 	if (!wasDirty) await document.save()

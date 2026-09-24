@@ -9,7 +9,7 @@ import { startBridgeServer } from "../src/server"
 const document: HostDocument = {
 	isDirty: true,
 	cells: () => [{ id: "a", source: "1\n" }],
-	hasRunningKernel: async () => true,
+	kernelStatus: async () => "idle",
 	execute: async () => "done",
 	outputs: () => [],
 	save: async () => {}

@@ -189,16 +189,22 @@ cells' outputs) and the count is reported, since nothing else would show the los
 - One endpoint, `POST /execute-cell`. Pi walks the connection files and sends the run to each
   live window until one doesn't answer `not-open`, so there is no discovery method.
 - `executeCell` order: find document → find cell (`metadata.id` or index) → source match
-  (CRLF-normalized, since VSCode on Windows may type CRLF) → running kernel → run → outputs →
-  save only if the document was clean before the run.
+  (CRLF-normalized, since VSCode on Windows may type CRLF) → kernel status `idle` or `busy`
+  (anything else, e.g. stuck `starting` or `dead`, fails fast) → run → outputs → save only if
+  the document was clean before the run.
 - Auth: 32-byte token compared in constant time, plus `Host` must equal `127.0.0.1:<port>` against
   DNS rebinding. Pi aborting closes the socket, which aborts the run and interrupts the cell.
 - `vscode-host.ts`: runs via `notebook.cell.execute` with `{ranges, document}` and waits for the
   cell's `executionSummary.timing.endTime` in `onDidChangeNotebookDocument`, subscribing before it
-  starts; cancels with `notebook.cell.cancelExecution`. "Running kernel" is Jupyter's
-  `kernels.getKernel(uri)`, which only sees started kernels. Outputs are mapped back to nbformat
-  (stdout/stderr/error mimes to stream/error, images to base64, `outputType` metadata for
-  `execute_result`).
+  starts. On timeout or abort it fires `notebook.cell.cancelExecution` without awaiting it (the
+  command blocks for the whole Win32 interrupt) and waits up to 30s for the cell to end:
+  `interrupted` or `still-running`. Kernel status is Jupyter's `kernels.getKernel(uri)?.status`,
+  which only sees started kernels. Outputs are mapped back to nbformat (stdout/stderr/error mimes
+  to stream/error, images to base64, `outputType` metadata for `execute_result`).
+- `extension.ts` returns the server close from `deactivate()`, which VSCode awaits; cleanup hung
+  on a subscription was cut off by window reloads, leaving connection files of dead windows.
+- Verified by a manual smoke test in VSCode 1.139 + Jupyter 2025.9 on Windows: lookup by id and
+  index, stream/HTML/PNG/error outputs, save vs not-saved, source mismatch, no kernel, timeout.
 - Pi side: `packages/pi/extensions/notebook/bridge.ts` (`executeInBridge`, dead-pid cleanup) and
   `notebook_execute_cell` in `index.ts`. It reads the disk cell with core `readNotebook` for
   `expectedSource`, formats outputs with core `formatCellOutputs`, and re-reads after a bridge
@@ -265,6 +271,6 @@ Tool-set prompt cost, measured at 14 tools: ~8.4K chars of schema + 0.9K of guid
 - Notebooks not already in Jupyter's canonical form are reformatted once on first save.
 - No-id notebooks depend on index selectors.
 - `notebook_run_all` (nbconvert) writes LF, so a CRLF notebook is rewritten by a run.
-- The bridge's VSCode side (`vscode-host.ts`) is unverified against real VSCode + Jupyter: the
-  `notebook.cell.execute` argument shape, completion detection and output mapping need a manual
-  smoke test.
+- Jupyter interrupts on Windows are slow: ~15s to stop a `time.sleep`, and the next run after an
+  interrupt can take 15-25s. The bridge reports it honestly but can't speed it up.
+- Bridge with two VSCode windows open is untested.
