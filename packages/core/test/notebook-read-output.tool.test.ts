@@ -1,7 +1,42 @@
 import { expect, test } from "bun:test"
+import { readFile } from "node:fs/promises"
 import { join } from "node:path"
-import { notebookReadOutputTool } from "../src/tools"
+import { notebookReadOutputTool, notebookSummaryTool } from "../src/tools"
 import { createTempNotebook, FIXTURE_DIR, firstText } from "./helpers"
+
+test("error and stream outputs are read without ANSI colour codes, which stay in the file", async () => {
+	const text = JSON.stringify({
+		nbformat: 4,
+		nbformat_minor: 5,
+		cells: [
+			{
+				cell_type: "code",
+				id: "c",
+				source: "1/0\n",
+				outputs: [
+					{ output_type: "stream", name: "stderr", text: ["\u001b[33mwarn\u001b[0m\n"] },
+					{
+						output_type: "error",
+						ename: "ZeroDivisionError",
+						evalue: "division by zero",
+						traceback: ["\u001b[0;31mZeroDivisionError\u001b[0m: division by zero"]
+					}
+				]
+			}
+		]
+	})
+	const fixture = await createTempNotebook("ansi.ipynb", text)
+	try {
+		expect(firstText(await notebookReadOutputTool.run({ path: fixture.path, cellId: "c", outputIndex: 0 }))).toBe("warn\n")
+		expect(firstText(await notebookReadOutputTool.run({ path: fixture.path, cellId: "c", outputIndex: 1 }))).toBe(
+			"ZeroDivisionError: division by zero"
+		)
+		expect(firstText(await notebookSummaryTool.run({ path: fixture.path }))).not.toContain("\u001b")
+		expect(await readFile(fixture.path, "utf8")).toBe(text)
+	} finally {
+		await fixture.cleanup()
+	}
+})
 
 test("runNotebookReadOutput labels each mime variant and wraps repr-like text", async () => {
 	const fixture = await createTempNotebook(
