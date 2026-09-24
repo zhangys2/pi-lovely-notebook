@@ -1,12 +1,12 @@
 import { expect, test } from "bun:test"
 import { executeCell, type HostCell, type HostDocument, type NotebookHost, type RunResult } from "../src/handlers"
 
-function fakeDocument(cells: HostCell[], options: { dirty?: boolean; kernel?: boolean; run?: RunResult } = {}) {
+function fakeDocument(cells: HostCell[], options: { dirty?: boolean; kernel?: string | undefined; run?: RunResult } = {}) {
 	const calls = { executed: [] as number[], saved: 0 }
 	const document: HostDocument = {
 		isDirty: options.dirty ?? false,
 		cells: () => cells,
-		hasRunningKernel: async () => options.kernel ?? true,
+		kernelStatus: async () => ("kernel" in options ? options.kernel : "idle"),
 		execute: async index => {
 			calls.executed.push(index)
 			return options.run ?? "done"
@@ -55,17 +55,40 @@ test("refuses to run when the live cell differs from disk, ignoring line-ending 
 })
 
 test("each precondition fails with its own error and runs nothing", async () => {
-	const { document, calls } = fakeDocument(cells, { kernel: false })
+	const { document, calls } = fakeDocument(cells, { kernel: undefined })
 	const run = (overrides: object, on = host("/nb.ipynb", document)) => executeCell(on, { ...request, ...overrides })
 	expect(await run({ cellId: "b", path: "/other.ipynb" })).toMatchObject({ ok: false, error: "not-open" })
 	expect(await run({ cellId: "zzz" })).toMatchObject({ ok: false, error: "cell-not-found" })
 	expect(await run({ index: 7 })).toMatchObject({ ok: false, error: "cell-not-found" })
-	expect(await run({ cellId: "b" })).toMatchObject({ ok: false, error: "no-kernel" })
+	expect(await run({ cellId: "b" })).toMatchObject({ ok: false, error: "no-kernel", message: expect.stringContaining("run any cell once") })
 	expect(calls.executed).toEqual([])
 })
 
-test("a timed-out run reports the interrupt and does not save", async () => {
-	const { document, calls } = fakeDocument(cells, { run: "timeout" })
-	expect(await executeCell(host("/nb.ipynb", document), { ...request, cellId: "b" })).toMatchObject({ ok: false, error: "timeout" })
-	expect(calls.saved).toBe(0)
+test("a kernel that is not idle or busy (stuck starting, dead) fails fast and names its status", async () => {
+	for (const status of ["starting", "dead"]) {
+		const { document, calls } = fakeDocument(cells, { kernel: status })
+		expect(await executeCell(host("/nb.ipynb", document), { ...request, cellId: "b" })).toMatchObject({
+			ok: false,
+			error: "no-kernel",
+			message: expect.stringContaining(`is ${status}`)
+		})
+		expect(calls.executed).toEqual([])
+	}
+	const busy = fakeDocument(cells, { kernel: "busy" })
+	expect((await executeCell(host("/nb.ipynb", busy.document), { ...request, cellId: "b" })).ok).toBe(true)
+})
+
+test("a timed-out run says whether the interrupt took effect, and does not save", async () => {
+	for (const [run, says] of [
+		["interrupted", "it was interrupted"],
+		["still-running", "still running"]
+	] as const) {
+		const { document, calls } = fakeDocument(cells, { run })
+		expect(await executeCell(host("/nb.ipynb", document), { ...request, cellId: "b" })).toMatchObject({
+			ok: false,
+			error: "timeout",
+			message: expect.stringContaining(says)
+		})
+		expect(calls.saved).toBe(0)
+	}
 })

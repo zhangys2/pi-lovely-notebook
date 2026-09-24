@@ -41,7 +41,7 @@ function liveDocument(source: string, options: { dirty?: boolean; onSave?: () =>
 	return {
 		isDirty: options.dirty ?? false,
 		cells: () => [{ source }],
-		hasRunningKernel: async () => true,
+		kernelStatus: async () => "idle",
 		execute: async () => "done",
 		outputs: () => [{ output_type: "execute_result", execution_count: 1, data: { "text/plain": "42" }, metadata: {} }],
 		save: options.onSave ?? (async () => {})
